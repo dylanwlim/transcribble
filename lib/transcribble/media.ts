@@ -1,0 +1,354 @@
+import type { FFmpeg } from "@ffmpeg/ffmpeg";
+
+import {
+  ACCEPT_ATTRIBUTE,
+  AUDIO_SAMPLE_RATE,
+  FFMPEG_CORE_BASE_URL,
+  MAX_FILE_SIZE_BYTES,
+  MAX_FILE_SIZE_LABEL,
+  SUPPORTED_EXTENSIONS,
+  VIDEO_EXTENSIONS,
+} from "@/lib/transcribble/constants";
+import { formatBytes } from "@/lib/transcribble/transcript";
+
+export interface ValidationResult {
+  ok: boolean;
+  extension?: string;
+  mediaKind?: "audio" | "video";
+  error?: string;
+}
+
+export interface PreparedAudio {
+  audio: Float32Array;
+  duration: number;
+  mediaKind: "audio" | "video";
+  usedFFmpeg: boolean;
+}
+
+export interface PreparationCallbacks {
+  onStatus?: (detail: string) => void;
+  onProgress?: (progress: number | null) => void;
+}
+
+type AudioContextConstructor = typeof AudioContext;
+type WindowWithWebKitAudioContext = Window &
+  typeof globalThis & {
+    webkitAudioContext?: AudioContextConstructor;
+  };
+
+let ffmpegPromise: Promise<FFmpeg> | null = null;
+let ffmpegProgressCallback: ((progress: number) => void) | null = null;
+
+export async function detectPreferredRuntime() {
+  if (typeof window === "undefined" || typeof navigator === "undefined") {
+    return "wasm" as const;
+  }
+
+  const gpu = (navigator as Navigator & {
+    gpu?: {
+      requestAdapter?: () => Promise<unknown>;
+    };
+  }).gpu;
+
+  if (!gpu || typeof gpu.requestAdapter !== "function") {
+    return "wasm" as const;
+  }
+
+  try {
+    const adapter = await gpu.requestAdapter();
+    return adapter ? ("webgpu" as const) : ("wasm" as const);
+  } catch {
+    return "wasm" as const;
+  }
+}
+
+export function getLocalInferenceCapabilityIssue() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  if (typeof Worker === "undefined") {
+    return "This browser does not support background workers, so local transcription cannot start.";
+  }
+
+  if (typeof WebAssembly === "undefined") {
+    return "This browser is missing WebAssembly support required for local inference.";
+  }
+
+  const AudioContextClass =
+    window.AudioContext ?? (window as WindowWithWebKitAudioContext).webkitAudioContext;
+
+  if (!AudioContextClass) {
+    return "This browser cannot decode media locally because the Web Audio API is unavailable.";
+  }
+
+  return null;
+}
+
+export function getFileExtension(name: string) {
+  const match = /\.[^.]+$/.exec(name.toLowerCase());
+  return match?.[0] ?? "";
+}
+
+export function validateMediaFile(file: File | null): ValidationResult {
+  if (!file) {
+    return {
+      ok: false,
+      error: "Choose a file to transcribe.",
+    };
+  }
+
+  const extension = getFileExtension(file.name);
+
+  if (!SUPPORTED_EXTENSIONS.includes(extension as (typeof SUPPORTED_EXTENSIONS)[number])) {
+    return {
+      ok: false,
+      error: `Unsupported file type. Use ${SUPPORTED_EXTENSIONS.join(", ")}.`,
+    };
+  }
+
+  if (file.size === 0) {
+    return {
+      ok: false,
+      error: "That file is empty. Choose a media file with playable audio.",
+    };
+  }
+
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    return {
+      ok: false,
+      error: `File is too large. Keep uploads under ${MAX_FILE_SIZE_LABEL} for reliable local processing.`,
+    };
+  }
+
+  return {
+    ok: true,
+    extension,
+    mediaKind: VIDEO_EXTENSIONS.has(extension) ? "video" : "audio",
+  };
+}
+
+function getAudioContextClass() {
+  const AudioContextClass =
+    window.AudioContext ?? (window as WindowWithWebKitAudioContext).webkitAudioContext;
+
+  if (!AudioContextClass) {
+    throw new Error("Web Audio is unavailable in this browser.");
+  }
+
+  return AudioContextClass;
+}
+
+async function decodeAudioData(arrayBuffer: ArrayBuffer) {
+  const AudioContextClass = getAudioContextClass();
+  const context = new AudioContextClass({ sampleRate: AUDIO_SAMPLE_RATE });
+
+  try {
+    const decoded = await context.decodeAudioData(arrayBuffer);
+    const audio = toMono(decoded);
+
+    if (audio.length === 0 || decoded.duration <= 0) {
+      throw new Error("The file did not contain readable audio.");
+    }
+
+    return {
+      audio,
+      duration: decoded.duration,
+    };
+  } finally {
+    await context.close().catch(() => undefined);
+  }
+}
+
+function toMono(buffer: AudioBuffer) {
+  if (buffer.numberOfChannels === 1) {
+    return new Float32Array(buffer.getChannelData(0));
+  }
+
+  const mono = new Float32Array(buffer.length);
+  const scale = Math.sqrt(2);
+  const left = buffer.getChannelData(0);
+  const right = buffer.getChannelData(1);
+
+  for (let index = 0; index < buffer.length; index += 1) {
+    mono[index] = (scale * (left[index] + right[index])) / 2;
+  }
+
+  return mono;
+}
+
+async function getFFmpeg(onProgress?: (progress: number) => void) {
+  ffmpegProgressCallback = onProgress ?? null;
+
+  if (!ffmpegPromise) {
+    ffmpegPromise = (async () => {
+      const [{ FFmpeg }, { toBlobURL }] = await Promise.all([
+        import("@ffmpeg/ffmpeg"),
+        import("@ffmpeg/util"),
+      ]);
+
+      const ffmpeg = new FFmpeg();
+
+      ffmpeg.on("progress", ({ progress }) => {
+        ffmpegProgressCallback?.(progress * 100);
+      });
+
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${FFMPEG_CORE_BASE_URL}/ffmpeg-core.js`, "text/javascript"),
+        wasmURL: await toBlobURL(`${FFMPEG_CORE_BASE_URL}/ffmpeg-core.wasm`, "application/wasm"),
+      });
+
+      return ffmpeg;
+    })();
+  }
+
+  return ffmpegPromise;
+}
+
+async function cleanupFFmpegFiles(ffmpeg: FFmpeg, ...files: string[]) {
+  const api = ffmpeg as FFmpeg & {
+    deleteFile?: (path: string) => Promise<void>;
+    unlink?: (path: string) => Promise<void>;
+  };
+
+  await Promise.all(
+    files.map(async (file) => {
+      try {
+        if (typeof api.deleteFile === "function") {
+          await api.deleteFile(file);
+        } else if (typeof api.unlink === "function") {
+          await api.unlink(file);
+        }
+      } catch {
+        return undefined;
+      }
+
+      return undefined;
+    }),
+  );
+}
+
+async function extractWithFFmpeg(file: File, callbacks: PreparationCallbacks): Promise<PreparedAudio> {
+  callbacks.onStatus?.("Preparing the local media runtime...");
+  const ffmpeg = await getFFmpeg(callbacks.onProgress);
+
+  callbacks.onStatus?.("Extracting an audio track in your browser...");
+  callbacks.onProgress?.(4);
+
+  const { fetchFile } = await import("@ffmpeg/util");
+  const extension = getFileExtension(file.name) || ".media";
+  const safeBaseName = file.name.replace(/[^a-z0-9]/gi, "-").toLowerCase() || "upload";
+  const inputName = `${safeBaseName}${extension}`;
+  const outputName = `${safeBaseName}-audio.wav`;
+
+  try {
+    await ffmpeg.writeFile(inputName, await fetchFile(file));
+    await ffmpeg.exec([
+      "-i",
+      inputName,
+      "-vn",
+      "-ac",
+      "1",
+      "-ar",
+      String(AUDIO_SAMPLE_RATE),
+      "-f",
+      "wav",
+      outputName,
+    ]);
+
+    const data = await ffmpeg.readFile(outputName);
+    const unknownData = data as unknown;
+    let buffer: ArrayBuffer;
+
+    if (data instanceof Uint8Array) {
+      buffer = data.slice().buffer;
+    } else if (unknownData instanceof ArrayBuffer) {
+      buffer = unknownData;
+    } else if (
+      typeof SharedArrayBuffer !== "undefined" &&
+      unknownData instanceof SharedArrayBuffer
+    ) {
+      buffer = new Uint8Array(unknownData).slice().buffer;
+    } else {
+      throw new Error("Local media extraction did not return audio bytes.");
+    }
+
+    const decoded = await decodeAudioData(buffer);
+
+    return {
+      ...decoded,
+      mediaKind: VIDEO_EXTENSIONS.has(extension) ? "video" : "audio",
+      usedFFmpeg: true,
+    };
+  } finally {
+    callbacks.onProgress?.(100);
+    await cleanupFFmpegFiles(ffmpeg, inputName, outputName);
+  }
+}
+
+export async function prepareAudioForTranscription(
+  file: File,
+  callbacks: PreparationCallbacks = {},
+): Promise<PreparedAudio> {
+  const validation = validateMediaFile(file);
+
+  if (!validation.ok || !validation.mediaKind) {
+    throw new Error(validation.error ?? "Choose a supported media file.");
+  }
+
+  if (validation.mediaKind === "video") {
+    return extractWithFFmpeg(file, callbacks);
+  }
+
+  callbacks.onStatus?.("Decoding audio locally...");
+  callbacks.onProgress?.(12);
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    callbacks.onProgress?.(45);
+
+    const decoded = await decodeAudioData(arrayBuffer);
+    callbacks.onProgress?.(100);
+
+    return {
+      ...decoded,
+      mediaKind: "audio",
+      usedFFmpeg: false,
+    };
+  } catch {
+    callbacks.onStatus?.("Browser decode fell back to a local media runtime...");
+    return extractWithFFmpeg(file, callbacks);
+  }
+}
+
+export function describeFile(file: File | null) {
+  if (!file) {
+    return "No media selected";
+  }
+
+  return `${getFileExtension(file.name).slice(1).toUpperCase()} · ${formatBytes(file.size)}`;
+}
+
+export function getInputAcceptValue() {
+  return ACCEPT_ATTRIBUTE;
+}
+
+export function humanizePreparationError(error: unknown) {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+
+    if (message.includes("decode")) {
+      return "The browser could not decode that media file locally.";
+    }
+
+    if (message.includes("memory") || message.includes("out of memory")) {
+      return "That file exceeded available browser memory. Try a shorter or smaller clip.";
+    }
+
+    return error.message;
+  }
+
+  return `Media preparation failed. Try a smaller file under ${MAX_FILE_SIZE_LABEL} (${formatBytes(
+    MAX_FILE_SIZE_BYTES,
+  )}) or switch browsers.`;
+}
