@@ -1,59 +1,67 @@
 "use client";
 
 import {
-  useCallback,
   startTransition,
+  useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 
+import { buildTranscriptDocument, updateTranscriptSegmentText } from "@/lib/transcribble/analysis";
 import {
   LOCAL_PROCESSING_NOTE,
   MODEL_LABELS,
   RUNTIME_LABELS,
   type Runtime,
 } from "@/lib/transcribble/constants";
+import { getExportFilename, serializeProject, type ExportFormat } from "@/lib/transcribble/export";
 import {
-  describeFile,
   detectPreferredRuntime,
   getInputAcceptValue,
   getLocalInferenceCapabilityIssue,
   humanizePreparationError,
   prepareAudioForTranscription,
   validateMediaFile,
+  warmMediaRuntime,
 } from "@/lib/transcribble/media";
 import {
+  createProjectFromFile,
+  recoverPersistedProjects,
+  updateProjectTimestamp,
+} from "@/lib/transcribble/projects";
+import { searchProjectEntries, searchProjectLibrary } from "@/lib/transcribble/search";
+import {
   buildReadableTranscript,
-  countCharacters,
-  countWords,
+  clampTime,
   formatBytes,
   formatDuration,
-  type TranscriptChunk,
 } from "@/lib/transcribble/transcript";
-
-export type TranscribbleStage =
-  | "idle"
-  | "preparing"
-  | "loading-model"
-  | "transcribing"
-  | "success"
-  | "error";
+import type {
+  HighlightColor,
+  LibrarySearchResult,
+  TranscriptChunk,
+  TranscriptDocument,
+  TranscriptMark,
+  TranscriptProject,
+  TranscriptSegment,
+} from "@/lib/transcribble/types";
+import {
+  deleteProject as deleteProjectRecord,
+  getProjectFile,
+  listProjects,
+  putProject,
+  putProjectWithFile,
+  putProjects,
+} from "@/lib/transcribble/workspace-db";
 
 interface WorkerProgressItem {
   file: string;
   progress: number;
   total?: number;
   loaded?: number;
-}
-
-interface TranscriptResult {
-  plainText: string;
-  chunks: TranscriptChunk[];
-  duration: number;
-  wordCount: number;
-  characterCount: number;
 }
 
 interface WorkerMessage {
@@ -80,118 +88,395 @@ interface WorkerMessage {
   };
 }
 
+interface ActiveJob {
+  jobId: number;
+  projectId: string;
+  duration: number;
+}
+
+interface WorkspaceNotice {
+  tone: "info" | "error";
+  message: string;
+}
+
+interface PersistedUiState {
+  selectedProjectId?: string | null;
+}
+
+interface PersistedAssetState {
+  modelReady: boolean;
+  mediaReady: boolean;
+  modelPrimedAt?: string;
+  mediaPrimedAt?: string;
+  lastModelRuntime?: Runtime;
+}
+
+interface AssetSetupState extends PersistedAssetState {
+  warmingModel: boolean;
+  warmingMedia: boolean;
+  online: boolean;
+  lastError?: string;
+}
+
+interface SetupJob {
+  jobId: number;
+  resolve: () => void;
+  reject: (error: Error) => void;
+}
+
+const UI_STATE_KEY = "transcribble-ui-state-v2";
+const ASSET_STATE_KEY = "transcribble-asset-state-v1";
+
+const DEFAULT_ASSET_STATE: PersistedAssetState = {
+  modelReady: false,
+  mediaReady: false,
+};
+
+function readStoredJson<T>(key: string) {
+  if (typeof window === "undefined") {
+    return null as T | null;
+  }
+
+  try {
+    return JSON.parse(window.localStorage.getItem(key) ?? "null") as T | null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredJson(key: string, value: unknown) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore storage failures in restrictive browser contexts.
+  }
+}
+
+function sortProjects(projects: TranscriptProject[]) {
+  return [...projects].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function isTextEntryTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const tagName = target.tagName.toLowerCase();
+  return target.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select";
+}
+
+function makeMarkLabel(segment: TranscriptSegment, kind: TranscriptMark["kind"]) {
+  const prefix = kind === "bookmark" ? "Saved moment" : "Highlight";
+  return `${prefix} · ${segment.text.slice(0, 48).trim()}${segment.text.length > 48 ? "…" : ""}`;
+}
+
 export function useTranscribble() {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const mediaRef = useRef<HTMLAudioElement | HTMLVideoElement | null>(null);
+  const transcriptSearchRef = useRef<HTMLInputElement | null>(null);
+  const librarySearchRef = useRef<HTMLInputElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
-  const runIdRef = useRef(0);
-  const copyTimeoutRef = useRef<number | null>(null);
-  const mediaReadyRef = useRef(false);
+  const workerListenerRef = useRef<(event: MessageEvent<WorkerMessage>) => void>(() => undefined);
+  const bookmarkShortcutRef = useRef<() => void>(() => undefined);
+  const jobCounterRef = useRef(0);
+  const activeJobRef = useRef<ActiveJob | null>(null);
+  const setupJobRef = useRef<SetupJob | null>(null);
+  const pendingSeekRef = useRef<number | null>(null);
+  const mediaUrlRef = useRef<string | null>(null);
+  const copiedTimeoutRef = useRef<number | null>(null);
+  const projectsRef = useRef<TranscriptProject[]>([]);
+  const selectedProjectIdRef = useRef<string | null>(null);
 
-  const [stage, setStage] = useState<TranscribbleStage>("idle");
-  const [message, setMessage] = useState("Drop a file to begin");
-  const [detail, setDetail] = useState(LOCAL_PROCESSING_NOTE);
-  const [progress, setProgress] = useState(0);
-  const [mediaProgress, setMediaProgress] = useState<number | null>(null);
-  const [progressItems, setProgressItems] = useState<WorkerProgressItem[]>([]);
-  const [currentFile, setCurrentFile] = useState<File | null>(null);
-  const [duration, setDuration] = useState<number | null>(null);
-  const [runtime, setRuntime] = useState<Runtime>("wasm");
-  const [transcript, setTranscript] = useState<TranscriptResult | null>(null);
-  const [partialTranscript, setPartialTranscript] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [projects, setProjects] = useState<TranscriptProject[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [runtime, setRuntime] = useState<Runtime>("wasm");
   const [capabilityIssue, setCapabilityIssue] = useState<string | null>(null);
-  const durationRef = useRef<number | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [notice, setNotice] = useState<WorkspaceNotice | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [assetProgressItems, setAssetProgressItems] = useState<WorkerProgressItem[]>([]);
+  const [partialTranscript, setPartialTranscript] = useState("");
+  const [libraryQuery, setLibraryQuery] = useState("");
+  const [transcriptQuery, setTranscriptQuery] = useState("");
+  const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
+  const [assetSetup, setAssetSetup] = useState<AssetSetupState>(() => ({
+    ...DEFAULT_ASSET_STATE,
+    ...(readStoredJson<PersistedAssetState>(ASSET_STATE_KEY) ?? DEFAULT_ASSET_STATE),
+    warmingModel: false,
+    warmingMedia: false,
+    online: typeof navigator === "undefined" ? true : navigator.onLine,
+  }));
 
-  const isBusy = stage === "preparing" || stage === "loading-model" || stage === "transcribing";
+  projectsRef.current = projects;
+  selectedProjectIdRef.current = selectedProjectId;
+  const deferredLibraryQuery = useDeferredValue(libraryQuery);
+  const deferredTranscriptQuery = useDeferredValue(transcriptQuery);
 
-  useEffect(() => {
-    let cancelled = false;
+  const persistProjectSelection = useCallback((projectId: string | null) => {
+    writeStoredJson(UI_STATE_KEY, { selectedProjectId: projectId } satisfies PersistedUiState);
+  }, []);
 
-    setCapabilityIssue(getLocalInferenceCapabilityIssue());
-    detectPreferredRuntime().then((detectedRuntime) => {
-      if (!cancelled) {
-        setRuntime(detectedRuntime);
+  const applyProjectUpdate = useCallback(
+    (
+      projectId: string,
+      updater: (project: TranscriptProject) => TranscriptProject,
+      options: {
+        persist?: boolean;
+        select?: boolean;
+      } = {},
+    ) => {
+      let nextProject: TranscriptProject | null = null;
+
+      setProjects((previous) => {
+        const nextProjects = previous.map((project) => {
+          if (project.id !== projectId) {
+            return project;
+          }
+
+          nextProject = updateProjectTimestamp(updater(project));
+          return nextProject;
+        });
+
+        return sortProjects(nextProjects);
+      });
+
+      if (options.select) {
+        setSelectedProjectId(projectId);
+        persistProjectSelection(projectId);
       }
-    });
 
-    return () => {
-      cancelled = true;
-      workerRef.current?.terminate();
-      workerRef.current = null;
-
-      if (copyTimeoutRef.current) {
-        window.clearTimeout(copyTimeoutRef.current);
+      if (options.persist && nextProject) {
+        void putProject(nextProject);
       }
-    };
-  }, []);
+    },
+    [persistProjectSelection],
+  );
 
-  const resetState = useCallback((hardReset: boolean) => {
-    runIdRef.current += 1;
-    mediaReadyRef.current = false;
-    durationRef.current = null;
+  const selectedProject = useMemo(
+    () => projects.find((project) => project.id === selectedProjectId) ?? null,
+    [projects, selectedProjectId],
+  );
 
-    if (hardReset) {
-      workerRef.current?.terminate();
-      workerRef.current = null;
+  const activeDocument = selectedProject?.transcript ?? null;
+  const transcriptSegments = useMemo(
+    () => activeDocument?.segments ?? [],
+    [activeDocument],
+  );
+  const transcriptTurns = useMemo(
+    () => activeDocument?.turns ?? [],
+    [activeDocument],
+  );
+
+  const playbackSegmentId = useMemo(() => {
+    if (!activeDocument || currentTime <= 0) {
+      return null;
     }
 
-    setStage("idle");
-    setMessage("Drop a file to begin");
-    setDetail(LOCAL_PROCESSING_NOTE);
-    setProgress(0);
-    setMediaProgress(null);
-    setProgressItems([]);
-    setCurrentFile(null);
-    setDuration(null);
-    setTranscript(null);
-    setPartialTranscript("");
-    setError(null);
-    setDragActive(false);
-    setCopied(false);
+    return (
+      activeDocument.segments.find(
+        (segment) => currentTime >= segment.start && currentTime <= segment.end + 0.35,
+      )?.id ?? null
+    );
+  }, [activeDocument, currentTime]);
 
-    if (inputRef.current) {
-      inputRef.current.value = "";
+  const focusedSegmentId = activeSegmentId ?? playbackSegmentId ?? activeDocument?.segments[0]?.id ?? null;
+  const focusedSegment = useMemo(
+    () => transcriptSegments.find((segment) => segment.id === focusedSegmentId) ?? null,
+    [focusedSegmentId, transcriptSegments],
+  );
+
+  const transcriptSearchResults = useMemo(
+    () =>
+      activeDocument ? searchProjectEntries(activeDocument.searchEntries, deferredTranscriptQuery) : [],
+    [activeDocument, deferredTranscriptQuery],
+  );
+
+  const librarySearchResults = useMemo(
+    () => searchProjectLibrary(projects, deferredLibraryQuery),
+    [deferredLibraryQuery, projects],
+  );
+
+  const queuedProjects = useMemo(
+    () => projects.filter((project) => project.status === "queued"),
+    [projects],
+  );
+
+  const projectGroups = useMemo(
+    () => ({
+      ready: projects.filter((project) => project.status === "ready"),
+      active: projects.filter((project) =>
+        project.status === "queued" ||
+        project.status === "preparing" ||
+        project.status === "loading-model" ||
+        project.status === "transcribing",
+      ),
+      errored: projects.filter((project) => project.status === "error"),
+    }),
+    [projects],
+  );
+
+  const currentProjectMarks = useMemo(
+    () => selectedProject?.marks ?? [],
+    [selectedProject],
+  );
+  const selectedFileStoreKey = selectedProject?.fileStoreKey ?? null;
+
+  const isBusy =
+    selectedProject?.status === "preparing" ||
+    selectedProject?.status === "loading-model" ||
+    selectedProject?.status === "transcribing" ||
+    queuedProjects.length > 0;
+
+  const getWorker = useCallback(() => {
+    if (!workerRef.current) {
+      const worker = new Worker(new URL("../workers/transcriber.worker.ts", import.meta.url), {
+        type: "module",
+      });
+      worker.addEventListener("message", (event) => workerListenerRef.current(event));
+      workerRef.current = worker;
     }
 
-    if (copyTimeoutRef.current) {
-      window.clearTimeout(copyTimeoutRef.current);
-      copyTimeoutRef.current = null;
-    }
+    return workerRef.current;
   }, []);
 
-  const finishWithError = useCallback((friendlyMessage: string) => {
-    setStage("error");
-    setError(friendlyMessage);
-    setMessage("Local transcription hit a problem");
-    setDetail(friendlyMessage);
-    setProgress(0);
-    setMediaProgress(null);
+  const markModelPrimed = useCallback((device: Runtime) => {
+    setAssetSetup((previous) => ({
+      ...previous,
+      modelReady: true,
+      warmingModel: false,
+      lastModelRuntime: device,
+      modelPrimedAt: new Date().toISOString(),
+      lastError: undefined,
+    }));
   }, []);
 
-  const handleWorkerMessage = useCallback((event: MessageEvent<WorkerMessage>) => {
-    const payload = event.data;
+  const markMediaPrimed = useCallback(() => {
+    setAssetSetup((previous) => ({
+      ...previous,
+      mediaReady: true,
+      warmingMedia: false,
+      mediaPrimedAt: new Date().toISOString(),
+      lastError: undefined,
+    }));
+  }, []);
 
-    if (payload.jobId !== runIdRef.current) {
+  const rejectSetupJob = useCallback((message: string) => {
+    const setupJob = setupJobRef.current;
+    if (!setupJob) {
       return;
     }
 
+    setupJob.reject(new Error(message));
+    setupJobRef.current = null;
+  }, []);
+
+  const resolveSetupJob = useCallback(() => {
+    const setupJob = setupJobRef.current;
+    if (!setupJob) {
+      return;
+    }
+
+    setupJob.resolve();
+    setupJobRef.current = null;
+  }, []);
+
+  const finishJob = useCallback(() => {
+    activeJobRef.current = null;
+    setAssetProgressItems([]);
+    setPartialTranscript("");
+  }, []);
+
+  const abortActiveJob = useCallback((projectId: string) => {
+    if (activeJobRef.current?.projectId !== projectId) {
+      return false;
+    }
+
+    activeJobRef.current = null;
+    workerRef.current?.terminate();
+    workerRef.current = null;
+    setAssetProgressItems([]);
+    setPartialTranscript("");
+    return true;
+  }, []);
+
+  const finishProjectWithError = useCallback(
+    (projectId: string, message: string) => {
+      applyProjectUpdate(
+        projectId,
+        (project) => ({
+          ...project,
+          status: "error",
+          progress: 0,
+          stageLabel: "Error",
+          detail: message,
+          error: message,
+        }),
+        { persist: true },
+      );
+      setNotice({
+        tone: "error",
+        message,
+      });
+      finishJob();
+    },
+    [applyProjectUpdate, finishJob],
+  );
+
+  workerListenerRef.current = (event: MessageEvent<WorkerMessage>) => {
+    const payload = event.data;
+    const activeJob = activeJobRef.current;
+    const setupJob = setupJobRef.current;
+    const isActiveJob = activeJob?.jobId === payload.jobId;
+    const isSetupJob = setupJob?.jobId === payload.jobId;
+
+    if (!isActiveJob && !isSetupJob) {
+      return;
+    }
+
+    const projectId = activeJob?.projectId;
+
     switch (payload.status) {
       case "loading":
-        setStage((previous) => (previous === "preparing" ? previous : "loading-model"));
-        setMessage("Loading the local model");
-        setDetail(payload.data ?? LOCAL_PROCESSING_NOTE);
+        if (isSetupJob) {
+          setAssetSetup((previous) => ({
+            ...previous,
+            warmingModel: true,
+            lastModelRuntime: payload.device,
+            lastError: undefined,
+          }));
+        }
+
+        if (projectId) {
+          applyProjectUpdate(
+            projectId,
+            (project) => ({
+              ...project,
+              status: "loading-model",
+              progress: Math.max(project.progress, 18),
+              stageLabel: "Loading model",
+              detail: payload.data ?? LOCAL_PROCESSING_NOTE,
+              runtime: payload.device,
+            }),
+          );
+        }
         break;
 
       case "initiate":
         if (payload.file) {
           const file = payload.file;
-          setProgressItems((items) => [
-            ...items,
+          setAssetProgressItems((items) => [
+            ...items.filter((item) => item.file !== file),
             {
               file,
-              progress: 0,
+              progress: payload.progress ?? 0,
               total: payload.total,
               loaded: payload.loaded,
             },
@@ -201,7 +486,7 @@ export function useTranscribble() {
 
       case "progress":
         if (payload.file) {
-          setProgressItems((items) =>
+          setAssetProgressItems((items) =>
             items.map((item) =>
               item.file === payload.file
                 ? {
@@ -214,312 +499,1093 @@ export function useTranscribble() {
             ),
           );
         }
-        setProgress((value) => Math.max(value, Math.round(((payload.progress ?? 0) / 100) * 42) + 12));
+
+        if (projectId) {
+          applyProjectUpdate(projectId, (project) => ({
+            ...project,
+            progress: Math.max(project.progress, Math.round(((payload.progress ?? 0) / 100) * 32) + 26),
+            stageLabel: "Downloading runtime",
+            detail: project.detail,
+          }));
+        }
         break;
 
       case "done":
         if (payload.file) {
-          setProgressItems((items) => items.filter((item) => item.file !== payload.file));
+          setAssetProgressItems((items) => items.filter((item) => item.file !== payload.file));
         }
-        setProgress((value) => Math.max(value, 56));
+
+        if (projectId) {
+          applyProjectUpdate(projectId, (project) => ({
+            ...project,
+            progress: Math.max(project.progress, 58),
+          }));
+        }
         break;
 
       case "ready":
-        if (!mediaReadyRef.current) {
-          setStage("loading-model");
-          setMessage("Model is ready");
-          setDetail("Finishing media prep before transcription starts.");
-          setProgress((value) => Math.max(value, 58));
+        markModelPrimed(payload.device);
+
+        if (projectId) {
+          applyProjectUpdate(projectId, (project) => ({
+            ...project,
+            status: "loading-model",
+            progress: Math.max(project.progress, 60),
+            stageLabel: "Model ready",
+            detail: "Local model is ready. Finishing media preparation before decoding speech.",
+            runtime: payload.device,
+          }));
+        } else {
+          setAssetProgressItems([]);
+          resolveSetupJob();
         }
         break;
 
       case "runtime-fallback":
         setRuntime("wasm");
-        setDetail(payload.data ?? "WebGPU was unavailable, so the browser switched to a local CPU fallback.");
+        setAssetSetup((previous) => ({
+          ...previous,
+          lastModelRuntime: "wasm",
+        }));
+
+        if (projectId) {
+          applyProjectUpdate(
+            projectId,
+            (project) => ({
+              ...project,
+              runtime: "wasm",
+              detail: payload.data ?? "Fell back to a WebAssembly runtime for local processing.",
+            }),
+            { persist: true },
+          );
+        }
         break;
 
       case "partial":
-        if (!payload.result) {
+        if (!payload.result || !projectId) {
           return;
         }
 
         {
           const result = payload.result;
-
-        startTransition(() => {
-          setStage("transcribing");
-          setMessage("Transcribing on-device");
-          setDetail(
-            payload.device === "webgpu"
-              ? "The browser is transcribing locally with GPU acceleration."
-              : "The browser is transcribing locally with a CPU fallback.",
-          );
-          setPartialTranscript(buildReadableTranscript(result));
-        });
+          startTransition(() => {
+            setPartialTranscript(buildReadableTranscript(result, projectId));
+          });
         }
 
-        setProgress((value) => Math.max(value, Math.round(((payload.progress ?? 0) / 100) * 34) + 58));
+        applyProjectUpdate(projectId, (project) => ({
+          ...project,
+          status: "transcribing",
+          progress: Math.max(project.progress, Math.round(((payload.progress ?? 0) / 100) * 34) + 60),
+          stageLabel: "Transcribing",
+          detail:
+            payload.device === "webgpu"
+              ? "Running local transcription with GPU acceleration."
+              : "Running local transcription with a CPU fallback.",
+          runtime: payload.device,
+        }));
         break;
 
       case "complete":
-        if (!payload.result) {
+        if (!payload.result || !projectId || !activeJob) {
           return;
         }
 
         {
-          const result = payload.result;
+          const currentProject = projectsRef.current.find((project) => project.id === projectId);
+          const document = buildTranscriptDocument(
+            projectId,
+            {
+              text: payload.result.text,
+              chunks: payload.result.chunks,
+            },
+            activeJob.duration,
+            currentProject?.marks ?? [],
+          );
 
-        startTransition(() => {
-          const plainText = buildReadableTranscript(result);
-          const transcriptDuration = durationRef.current ?? 0;
-
-          setTranscript({
-            plainText,
-            chunks: result.chunks ?? [],
-            duration: transcriptDuration,
-            wordCount: countWords(plainText),
-            characterCount: countCharacters(plainText),
-          });
-          setPartialTranscript(plainText);
-        });
+          applyProjectUpdate(
+            projectId,
+            (project) => ({
+              ...project,
+              status: "ready",
+              progress: 100,
+              stageLabel: "Ready",
+              detail: "Saved locally. Search, edit, export, and reopen this workspace anytime.",
+              error: undefined,
+              duration: activeJob.duration,
+              runtime: payload.device,
+              transcript: document,
+            }),
+            { persist: true, select: !selectedProjectIdRef.current },
+          );
         }
 
-        setStage("success");
-        setMessage("Transcript ready");
-        setDetail("Everything above was processed locally in your browser.");
-        setProgress(100);
-        setMediaProgress(null);
-        setError(null);
+        finishJob();
         break;
 
-      case "error":
-        finishWithError(
+      case "error": {
+        const message =
           payload.data?.toLowerCase().includes("memory")
             ? "The browser ran out of memory while transcribing. Try a shorter file or use a desktop browser."
-            : payload.data ?? "Local transcription failed. Try again with a smaller file or a recent Chrome/Edge build.",
-        );
+            : payload.data ?? "Local transcription failed. Try again with a smaller file or a recent Chrome or Edge build.";
+
+        if (isSetupJob) {
+          setAssetSetup((previous) => ({
+            ...previous,
+            warmingModel: false,
+            lastError: message,
+          }));
+          setAssetProgressItems([]);
+          rejectSetupJob(message);
+        }
+
+        if (projectId) {
+          finishProjectWithError(projectId, message);
+        }
         break;
+      }
 
       default:
         break;
     }
-  }, [finishWithError]);
+  };
 
-  const getWorker = useCallback(() => {
-    if (!workerRef.current) {
-      workerRef.current = new Worker(new URL("../workers/transcriber.worker.ts", import.meta.url), {
-        type: "module",
+  const processProject = useCallback(
+    async (project: TranscriptProject) => {
+      if (capabilityIssue) {
+        finishProjectWithError(project.id, capabilityIssue);
+        return;
+      }
+
+      const file = await getProjectFile(project.fileStoreKey);
+      if (!file) {
+        finishProjectWithError(project.id, "The source media could not be found in local storage.");
+        return;
+      }
+
+      jobCounterRef.current += 1;
+      const jobId = jobCounterRef.current;
+      activeJobRef.current = {
+        jobId,
+        projectId: project.id,
+        duration: project.duration ?? 0,
+      };
+      setAssetProgressItems([]);
+      setPartialTranscript("");
+
+      applyProjectUpdate(
+        project.id,
+        (current) => ({
+          ...current,
+          status: "preparing",
+          progress: 8,
+          stageLabel: "Preparing media",
+          detail: "Reading the local media file and preparing audio for transcription.",
+          error: undefined,
+        }),
+        { persist: true },
+      );
+
+      const worker = getWorker();
+      worker.postMessage({
+        type: "preload",
+        jobId,
+        device: runtime,
       });
-      workerRef.current.addEventListener("message", handleWorkerMessage);
+
+      try {
+        const prepared = await prepareAudioForTranscription(file, {
+          onStatus: (detail) => {
+            if (activeJobRef.current?.jobId !== jobId) {
+              return;
+            }
+
+            applyProjectUpdate(project.id, (current) => ({
+              ...current,
+              status: "preparing",
+              progress: Math.max(current.progress, 14),
+              stageLabel: "Preparing media",
+              detail,
+            }));
+          },
+          onProgress: (progress) => {
+            if (activeJobRef.current?.jobId !== jobId || progress === null) {
+              return;
+            }
+
+            applyProjectUpdate(project.id, (current) => ({
+              ...current,
+              progress: Math.max(current.progress, Math.round((progress / 100) * 22) + 10),
+            }));
+          },
+        });
+
+        if (activeJobRef.current?.jobId !== jobId) {
+          return;
+        }
+
+        activeJobRef.current = {
+          jobId,
+          projectId: project.id,
+          duration: prepared.duration,
+        };
+
+        if (prepared.usedFFmpeg) {
+          markMediaPrimed();
+        }
+
+        applyProjectUpdate(
+          project.id,
+          (current) => ({
+            ...current,
+            status: "transcribing",
+            progress: Math.max(current.progress, 60),
+            stageLabel: "Transcribing",
+            detail: "Decoding speech locally. Large files can take time on slower hardware.",
+            duration: prepared.duration,
+          }),
+          { persist: true },
+        );
+
+        worker.postMessage(
+          {
+            type: "transcribe",
+            jobId,
+            device: runtime,
+            audio: prepared.audio,
+            duration: prepared.duration,
+          },
+          [prepared.audio.buffer],
+        );
+      } catch (error) {
+        if (activeJobRef.current?.jobId !== jobId) {
+          return;
+        }
+
+        finishProjectWithError(project.id, humanizePreparationError(error));
+      }
+    },
+    [applyProjectUpdate, capabilityIssue, finishProjectWithError, getWorker, markMediaPrimed, runtime],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setCapabilityIssue(getLocalInferenceCapabilityIssue());
+    setAssetSetup((previous) => ({
+      ...previous,
+      online: typeof navigator === "undefined" ? true : navigator.onLine,
+    }));
+
+    detectPreferredRuntime().then((detectedRuntime) => {
+      if (!cancelled) {
+        setRuntime(detectedRuntime);
+      }
+    });
+
+    void (async () => {
+      const storedProjects = await listProjects();
+      if (cancelled) {
+        return;
+      }
+
+      const recoveredProjects = recoverPersistedProjects(storedProjects);
+      setProjects(sortProjects(recoveredProjects));
+
+      if (recoveredProjects.some((project, index) => project !== storedProjects[index])) {
+        await putProjects(recoveredProjects);
+      }
+
+      const nextSelectedProjectId =
+        readStoredJson<PersistedUiState>(UI_STATE_KEY)?.selectedProjectId ?? null;
+
+      setSelectedProjectId(
+        recoveredProjects.find((project) => project.id === nextSelectedProjectId)?.id ??
+          recoveredProjects[0]?.id ??
+          null,
+      );
+      setWorkspaceReady(true);
+    })();
+
+    const syncOnlineState = () => {
+      setAssetSetup((previous) => ({
+        ...previous,
+        online: navigator.onLine,
+      }));
+    };
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("online", syncOnlineState);
+      window.addEventListener("offline", syncOnlineState);
     }
 
-    return workerRef.current;
-  }, [handleWorkerMessage]);
+    return () => {
+      cancelled = true;
+      if (typeof window !== "undefined") {
+        window.removeEventListener("online", syncOnlineState);
+        window.removeEventListener("offline", syncOnlineState);
+      }
+      workerRef.current?.terminate();
+      workerRef.current = null;
+      setupJobRef.current?.reject(new Error("Worker stopped before setup completed."));
+      setupJobRef.current = null;
 
-  const startFileJob = useCallback(async (file: File) => {
-    const validation = validateMediaFile(file);
+      if (copiedTimeoutRef.current !== null) {
+        window.clearTimeout(copiedTimeoutRef.current);
+        copiedTimeoutRef.current = null;
+      }
 
-    if (!validation.ok) {
-      finishWithError(validation.error ?? "Choose a supported media file.");
+      if (mediaUrlRef.current) {
+        URL.revokeObjectURL(mediaUrlRef.current);
+        mediaUrlRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    writeStoredJson(ASSET_STATE_KEY, {
+      modelReady: assetSetup.modelReady,
+      mediaReady: assetSetup.mediaReady,
+      modelPrimedAt: assetSetup.modelPrimedAt,
+      mediaPrimedAt: assetSetup.mediaPrimedAt,
+      lastModelRuntime: assetSetup.lastModelRuntime,
+    } satisfies PersistedAssetState);
+  }, [
+    assetSetup.lastModelRuntime,
+    assetSetup.mediaPrimedAt,
+    assetSetup.mediaReady,
+    assetSetup.modelPrimedAt,
+    assetSetup.modelReady,
+  ]);
+
+  useEffect(() => {
+    if (!workspaceReady || activeJobRef.current || queuedProjects.length === 0) {
       return;
     }
 
-    if (capabilityIssue) {
-      finishWithError(capabilityIssue);
+    const nextProject = queuedProjects[0];
+    if (!nextProject) {
       return;
     }
 
-    runIdRef.current += 1;
-    mediaReadyRef.current = false;
-    const jobId = runIdRef.current;
+    void processProject(nextProject);
+  }, [processProject, queuedProjects, workspaceReady]);
 
-    setCurrentFile(file);
-    setDuration(null);
-    durationRef.current = null;
-    setTranscript(null);
-    setPartialTranscript("");
-    setError(null);
-    setProgressItems([]);
-    setCopied(false);
-    setStage("preparing");
-    setMessage("Preparing your media");
-    setDetail("Reading the file locally before transcription starts.");
-    setProgress(8);
-    setMediaProgress(0);
+  useEffect(() => {
+    let cancelled = false;
 
-    const activeWorker = getWorker();
-    activeWorker.postMessage({
+    if (!selectedFileStoreKey) {
+      if (mediaUrlRef.current) {
+        URL.revokeObjectURL(mediaUrlRef.current);
+        mediaUrlRef.current = null;
+      }
+      setMediaUrl(null);
+      setCurrentTime(0);
+      setIsPlaying(false);
+      return;
+    }
+
+    void (async () => {
+      const file = await getProjectFile(selectedFileStoreKey);
+      if (cancelled) {
+        return;
+      }
+
+      if (mediaUrlRef.current) {
+        URL.revokeObjectURL(mediaUrlRef.current);
+      }
+
+      if (!file) {
+        mediaUrlRef.current = null;
+        setMediaUrl(null);
+        return;
+      }
+
+      const url = URL.createObjectURL(file);
+      mediaUrlRef.current = url;
+      setMediaUrl(url);
+      setCurrentTime(0);
+      setIsPlaying(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFileStoreKey]);
+
+  const enqueueFiles = useCallback(
+    async (files: File[]) => {
+      if (files.length === 0) {
+        return;
+      }
+
+      const nextProjects: TranscriptProject[] = [];
+      const errors: string[] = [];
+
+      for (const file of files) {
+        const validation = validateMediaFile(file);
+
+        if (!validation.ok) {
+          errors.push(`${file.name}: ${validation.error ?? "Unsupported media file."}`);
+          continue;
+        }
+
+        const project = createProjectFromFile(file, runtime);
+
+        try {
+          await putProjectWithFile(project, file);
+          nextProjects.push(project);
+        } catch {
+          errors.push(`${file.name}: Local storage failed while saving the project. Check browser storage availability.`);
+        }
+      }
+
+      if (nextProjects.length > 0) {
+        setProjects((previous) => sortProjects([...nextProjects, ...previous]));
+
+        if (!selectedProjectId) {
+          setSelectedProjectId(nextProjects[0]?.id ?? null);
+          persistProjectSelection(nextProjects[0]?.id ?? null);
+        }
+      }
+
+      if (errors.length > 0) {
+        setNotice({
+          tone: "error",
+          message: errors.join(" "),
+        });
+      } else if (nextProjects.length > 0) {
+        setNotice({
+          tone: "info",
+          message:
+            nextProjects.length === 1
+              ? `Queued ${nextProjects[0].sourceName} for local transcription.`
+              : `Queued ${nextProjects.length} files for local transcription.`,
+        });
+      }
+    },
+    [persistProjectSelection, runtime, selectedProjectId],
+  );
+
+  const openFilePicker = useCallback(() => {
+    inputRef.current?.click();
+  }, []);
+
+  const onFileInputChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(event.target.files ?? []);
+      void enqueueFiles(files);
+      event.target.value = "";
+    },
+    [enqueueFiles],
+  );
+
+  const onDrop = useCallback(
+    (event: React.DragEvent<HTMLElement>) => {
+      event.preventDefault();
+      setDragActive(false);
+      void enqueueFiles(Array.from(event.dataTransfer.files ?? []));
+    },
+    [enqueueFiles],
+  );
+
+  const onCopyTranscript = useCallback(async () => {
+    if (!selectedProject?.transcript?.plainText) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(selectedProject.transcript.plainText);
+      setCopied(true);
+
+      if (copiedTimeoutRef.current !== null) {
+        window.clearTimeout(copiedTimeoutRef.current);
+      }
+
+      copiedTimeoutRef.current = window.setTimeout(() => {
+        setCopied(false);
+        copiedTimeoutRef.current = null;
+      }, 1500);
+    } catch {
+      setNotice({
+        tone: "error",
+        message: "Clipboard access failed. Copy from the transcript panel directly.",
+      });
+    }
+  }, [selectedProject]);
+
+  const onDownloadTranscript = useCallback(
+    (format: ExportFormat) => {
+      if (!selectedProject?.transcript) {
+        return;
+      }
+
+      const contents = serializeProject(selectedProject, format);
+      const blob = new Blob([contents], {
+        type:
+          format === "txt"
+            ? "text/plain;charset=utf-8"
+            : format === "md"
+              ? "text/markdown;charset=utf-8"
+              : "text/vtt;charset=utf-8",
+      });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = getExportFilename(selectedProject, format);
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    },
+    [selectedProject],
+  );
+
+  const selectProject = useCallback(
+    (projectId: string) => {
+      setSelectedProjectId(projectId);
+      persistProjectSelection(projectId);
+      setActiveSegmentId(null);
+      setTranscriptQuery("");
+      setPartialTranscript("");
+      setNotice(null);
+    },
+    [persistProjectSelection],
+  );
+
+  const activeDuration = selectedProject?.transcript?.stats.duration ?? selectedProject?.duration;
+
+  const seekToTime = useCallback(
+    (time: number, autoplay = false) => {
+      const nextTime = clampTime(time, activeDuration);
+      pendingSeekRef.current = nextTime;
+
+      if (mediaRef.current) {
+        mediaRef.current.currentTime = nextTime;
+        setCurrentTime(nextTime);
+
+        if (autoplay) {
+          void mediaRef.current.play();
+        }
+      }
+    },
+    [activeDuration],
+  );
+
+  const selectSegment = useCallback(
+    (segmentId: string, autoplay = false) => {
+      const segment = transcriptSegments.find((item) => item.id === segmentId);
+      if (!segment) {
+        return;
+      }
+
+      setActiveSegmentId(segmentId);
+      seekToTime(segment.start, autoplay);
+    },
+    [seekToTime, transcriptSegments],
+  );
+
+  const selectAdjacentSegment = useCallback(
+    (direction: -1 | 1, autoplay = false) => {
+      const currentIndex = transcriptSegments.findIndex((segment) => segment.id === focusedSegmentId);
+      const targetIndex =
+        currentIndex === -1 ? (direction > 0 ? 0 : transcriptSegments.length - 1) : currentIndex + direction;
+      const nextSegment = transcriptSegments[Math.max(0, Math.min(transcriptSegments.length - 1, targetIndex))];
+
+      if (!nextSegment) {
+        return;
+      }
+
+      selectSegment(nextSegment.id, autoplay);
+    },
+    [focusedSegmentId, selectSegment, transcriptSegments],
+  );
+
+  const seekByDelta = useCallback(
+    (deltaSeconds: number) => {
+      seekToTime(currentTime + deltaSeconds);
+    },
+    [currentTime, seekToTime],
+  );
+
+  const jumpToTranscriptMatch = useCallback(
+    (direction: -1 | 1) => {
+      if (transcriptSearchResults.length === 0) {
+        return;
+      }
+
+      const currentIndex = transcriptSearchResults.findIndex(
+        (result) => result.entry.segmentId === focusedSegmentId,
+      );
+
+      const nextIndex =
+        currentIndex === -1
+          ? direction > 0
+            ? 0
+            : transcriptSearchResults.length - 1
+          : (currentIndex + direction + transcriptSearchResults.length) % transcriptSearchResults.length;
+
+      const nextMatch = transcriptSearchResults[nextIndex];
+      if (!nextMatch) {
+        return;
+      }
+
+      selectSegment(nextMatch.entry.segmentId);
+    },
+    [focusedSegmentId, selectSegment, transcriptSearchResults],
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isTextEntryTarget(event.target)) {
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        librarySearchRef.current?.focus();
+        librarySearchRef.current?.select();
+        return;
+      }
+
+      if (event.key === "/") {
+        event.preventDefault();
+        transcriptSearchRef.current?.focus();
+        transcriptSearchRef.current?.select();
+        return;
+      }
+
+      if (event.code === "Space") {
+        event.preventDefault();
+        if (mediaRef.current) {
+          if (mediaRef.current.paused) {
+            void mediaRef.current.play();
+          } else {
+            mediaRef.current.pause();
+          }
+        }
+        return;
+      }
+
+      if (event.key.toLowerCase() === "b" && focusedSegmentId) {
+        event.preventDefault();
+        bookmarkShortcutRef.current();
+        return;
+      }
+
+      if (event.key.toLowerCase() === "j") {
+        event.preventDefault();
+        selectAdjacentSegment(1);
+      }
+
+      if (event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        selectAdjacentSegment(-1);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [focusedSegmentId, selectAdjacentSegment]);
+
+  const updateSelectedSegmentText = useCallback(
+    (nextText: string) => {
+      if (!selectedProject || !selectedProject.transcript || !focusedSegment) {
+        return;
+      }
+
+      const nextMarks = selectedProject.marks.map((mark) =>
+        mark.segmentId === focusedSegment.id
+          ? {
+              ...mark,
+              label: makeMarkLabel(
+                {
+                  ...focusedSegment,
+                  text: nextText.trim() || focusedSegment.text,
+                },
+                mark.kind,
+              ),
+            }
+          : mark,
+      );
+
+      const nextDocument = updateTranscriptSegmentText(
+        selectedProject.id,
+        selectedProject.transcript,
+        focusedSegment.id,
+        nextText,
+        nextMarks,
+      );
+
+      applyProjectUpdate(
+        selectedProject.id,
+        (project) => ({
+          ...project,
+          marks: nextMarks,
+          transcript: nextDocument,
+          detail: "Autosaved locally after transcript edit.",
+        }),
+        { persist: true },
+      );
+    },
+    [applyProjectUpdate, focusedSegment, selectedProject],
+  );
+
+  const renameSelectedProject = useCallback(
+    (nextTitle: string) => {
+      if (!selectedProject) {
+        return;
+      }
+
+      const trimmed = nextTitle.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      applyProjectUpdate(
+        selectedProject.id,
+        (project) => ({
+          ...project,
+          title: trimmed,
+          detail: "Autosaved locally.",
+        }),
+        { persist: true },
+      );
+    },
+    [applyProjectUpdate, selectedProject],
+  );
+
+  const upsertMark = useCallback(
+    (kind: TranscriptMark["kind"], color?: HighlightColor) => {
+      if (!selectedProject || !focusedSegment) {
+        return;
+      }
+
+      const existingMark = selectedProject.marks.find(
+        (mark) => mark.segmentId === focusedSegment.id && mark.kind === kind,
+      );
+
+      const nextMarks = existingMark
+        ? kind === "highlight" && color && existingMark.color !== color
+          ? selectedProject.marks.map((mark) =>
+              mark.id === existingMark.id
+                ? {
+                    ...mark,
+                    color,
+                    label: makeMarkLabel(focusedSegment, kind),
+                  }
+                : mark,
+            )
+          : selectedProject.marks.filter((mark) => mark.id !== existingMark.id)
+        : [
+            ...selectedProject.marks,
+            {
+              id: crypto.randomUUID(),
+              kind,
+              segmentId: focusedSegment.id,
+              createdAt: new Date().toISOString(),
+              label: makeMarkLabel(focusedSegment, kind),
+              color,
+            },
+          ];
+
+      const nextDocument = selectedProject.transcript
+        ? ({
+            ...selectedProject.transcript,
+            stats: {
+              ...selectedProject.transcript.stats,
+              bookmarkCount: nextMarks.filter((mark) => mark.kind === "bookmark").length,
+              highlightCount: nextMarks.filter((mark) => mark.kind === "highlight").length,
+            },
+          } satisfies TranscriptDocument)
+        : undefined;
+
+      applyProjectUpdate(
+        selectedProject.id,
+        (project) => ({
+          ...project,
+          marks: nextMarks,
+          transcript: nextDocument,
+          detail: "Autosaved locally.",
+        }),
+        { persist: true },
+      );
+    },
+    [applyProjectUpdate, focusedSegment, selectedProject],
+  );
+
+  bookmarkShortcutRef.current = () => upsertMark("bookmark");
+
+  const retryProject = useCallback(
+    (projectId: string) => {
+      applyProjectUpdate(
+        projectId,
+        (project) => ({
+          ...project,
+          status: "queued",
+          progress: 0,
+          stageLabel: "Queued",
+          detail: "Queued to retry local transcription.",
+          error: undefined,
+        }),
+        { persist: true, select: true },
+      );
+    },
+    [applyProjectUpdate],
+  );
+
+  const removeProject = useCallback(
+    async (projectId: string) => {
+      const project = projectsRef.current.find((item) => item.id === projectId);
+      if (!project) {
+        return;
+      }
+
+      const shouldRemove =
+        typeof window === "undefined"
+          ? true
+          : window.confirm(
+              project.status === "transcribing" || project.status === "preparing" || project.status === "loading-model"
+                ? `Delete "${project.title}" and stop its local transcription job? This will remove the saved media and transcript state from this browser.`
+                : `Delete "${project.title}" from this browser? This removes the saved media, transcript, and workspace state.`,
+            );
+
+      if (!shouldRemove) {
+        return;
+      }
+
+      abortActiveJob(projectId);
+
+      const nextProjects = projectsRef.current.filter((item) => item.id !== projectId);
+      setProjects(sortProjects(nextProjects));
+
+      if (selectedProjectId === projectId) {
+        const fallbackProjectId = nextProjects[0]?.id ?? null;
+        setSelectedProjectId(fallbackProjectId);
+        persistProjectSelection(fallbackProjectId);
+      }
+
+      await deleteProjectRecord(project);
+      setNotice({
+        tone: "info",
+        message: `"${project.title}" was removed from local storage.`,
+      });
+    },
+    [abortActiveJob, persistProjectSelection, selectedProjectId],
+  );
+
+  const openLibrarySearchResult = useCallback(
+    (result: LibrarySearchResult) => {
+      selectProject(result.projectId);
+      if (result.matchKind === "segment" && result.entry.segmentId) {
+        setActiveSegmentId(result.entry.segmentId);
+        seekToTime(result.entry.start);
+      }
+    },
+    [seekToTime, selectProject],
+  );
+
+  const primeTranscriptionModel = useCallback(async () => {
+    if (activeJobRef.current || setupJobRef.current || assetSetup.warmingModel || queuedProjects.length > 0) {
+      return;
+    }
+
+    jobCounterRef.current += 1;
+    const jobId = jobCounterRef.current;
+    setAssetProgressItems([]);
+    setAssetSetup((previous) => ({
+      ...previous,
+      warmingModel: true,
+      lastError: undefined,
+    }));
+
+    const ready = new Promise<void>((resolve, reject) => {
+      setupJobRef.current = {
+        jobId,
+        resolve,
+        reject,
+      };
+    });
+
+    getWorker().postMessage({
       type: "preload",
       jobId,
       device: runtime,
     });
 
     try {
-      const prepared = await prepareAudioForTranscription(file, {
-        onStatus: (nextDetail) => {
-          if (jobId !== runIdRef.current) {
-            return;
-          }
+      await ready;
+      setNotice({
+        tone: "info",
+        message: "The local transcription model is warmed and ready for reuse in this browser profile.",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to warm the local transcription model.";
+      setNotice({
+        tone: "error",
+        message,
+      });
+    }
+  }, [assetSetup.warmingModel, getWorker, queuedProjects.length, runtime]);
 
-          setStage("preparing");
-          setDetail(nextDetail);
-        },
-        onProgress: (nextProgress) => {
-          if (jobId !== runIdRef.current || nextProgress === null) {
-            return;
-          }
+  const primeMediaRuntime = useCallback(async () => {
+    if (activeJobRef.current || assetSetup.warmingMedia || queuedProjects.length > 0) {
+      return;
+    }
 
-          setMediaProgress(nextProgress);
-          setProgress((value) => Math.max(value, Math.round((nextProgress / 100) * 22) + 10));
+    setAssetSetup((previous) => ({
+      ...previous,
+      warmingMedia: true,
+      lastError: undefined,
+    }));
+    setAssetProgressItems([
+      {
+        file: "ffmpeg-core",
+        progress: 0,
+      },
+    ]);
+
+    try {
+      await warmMediaRuntime({
+        onProgress: (progress) => {
+          setAssetProgressItems([
+            {
+              file: "ffmpeg-core",
+              progress: progress ?? 0,
+            },
+          ]);
         },
       });
 
-      if (jobId !== runIdRef.current) {
-        return;
-      }
-
-      mediaReadyRef.current = true;
-      setDuration(prepared.duration);
-      durationRef.current = prepared.duration;
-      setMediaProgress(null);
-      setStage("transcribing");
-      setMessage("Transcribing on-device");
-      setDetail("The browser is decoding speech locally. Large files can take a while on slower hardware.");
-      setProgress((value) => Math.max(value, 60));
-
-      activeWorker.postMessage(
-        {
-          type: "transcribe",
-          jobId,
-          device: runtime,
-          audio: prepared.audio,
-          duration: prepared.duration,
-        },
-        [prepared.audio.buffer],
-      );
-    } catch (preparationError) {
-      if (jobId !== runIdRef.current) {
-        return;
-      }
-
-      finishWithError(humanizePreparationError(preparationError));
+      markMediaPrimed();
+      setAssetProgressItems([]);
+      setNotice({
+        tone: "info",
+        message: "The local media runtime is cached for video extraction and offline fallback in this browser profile.",
+      });
+    } catch (error) {
+      const message = humanizePreparationError(error);
+      setAssetSetup((previous) => ({
+        ...previous,
+        warmingMedia: false,
+        lastError: message,
+      }));
+      setAssetProgressItems([]);
+      setNotice({
+        tone: "error",
+        message,
+      });
     }
-  }, [capabilityIssue, finishWithError, getWorker, runtime]);
+  }, [assetSetup.warmingMedia, markMediaPrimed, queuedProjects.length]);
 
-  const openFilePicker = useCallback(() => {
-    if (!isBusy) {
-      inputRef.current?.click();
-    }
-  }, [isBusy]);
-
-  const onFileInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] ?? null;
-    if (!file) {
-      finishWithError("Choose a file to transcribe.");
-      return;
-    }
-
-    void startFileJob(file);
-  }, [finishWithError, startFileJob]);
-
-  const onDrop = useCallback((event: React.DragEvent<HTMLElement>) => {
-    event.preventDefault();
-    setDragActive(false);
-
-    if (isBusy) {
-      return;
-    }
-
-    const file = event.dataTransfer.files?.[0] ?? null;
-    if (!file) {
-      finishWithError("Drop a media file to start transcription.");
-      return;
-    }
-
-    void startFileJob(file);
-  }, [finishWithError, isBusy, startFileJob]);
-
-  const onCopyTranscript = useCallback(async () => {
-    if (!transcript?.plainText) {
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(transcript.plainText);
-      setCopied(true);
-
-      if (copyTimeoutRef.current) {
-        window.clearTimeout(copyTimeoutRef.current);
-      }
-
-      copyTimeoutRef.current = window.setTimeout(() => {
-        setCopied(false);
-      }, 1600);
-    } catch {
-      finishWithError("Clipboard access failed. Try copying from the transcript panel directly.");
-    }
-  }, [finishWithError, transcript]);
-
-  const onDownloadTranscript = useCallback(() => {
-    if (!transcript?.plainText) {
-      return;
-    }
-
-    const baseName = currentFile?.name.replace(/\.[^.]+$/, "") || "transcribble";
-    const blob = new Blob([transcript.plainText], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${baseName}-transcript.txt`;
-    link.click();
-    URL.revokeObjectURL(url);
-  }, [currentFile, transcript]);
-
-  const sessionSummary = useMemo(
-    () => ({
-      fileMeta: describeFile(currentFile),
-      durationLabel: duration ? formatDuration(duration) : "Not ready yet",
-      runtimeLabel: RUNTIME_LABELS[runtime],
-      modelLabel: MODEL_LABELS[runtime],
-      fileSizeLabel: currentFile ? formatBytes(currentFile.size) : "No file selected",
-    }),
-    [currentFile, duration, runtime],
+  const currentFileMeta = useMemo(
+    () =>
+      selectedProject
+        ? {
+            fileMeta: selectedProject.sourceName,
+            durationLabel: selectedProject.transcript
+              ? formatDuration(selectedProject.transcript.stats.duration)
+              : selectedProject.duration
+                ? formatDuration(selectedProject.duration)
+                : "Not ready yet",
+            runtimeLabel: selectedProject.runtime ? RUNTIME_LABELS[selectedProject.runtime] : "Waiting for runtime",
+            modelLabel: selectedProject.runtime ? MODEL_LABELS[selectedProject.runtime] : "Whisper base timestamped",
+            fileSizeLabel: formatBytes(selectedProject.sourceSize),
+          }
+        : {
+            fileMeta: "No project selected",
+            durationLabel: "Not ready yet",
+            runtimeLabel: RUNTIME_LABELS[runtime],
+            modelLabel: MODEL_LABELS[runtime],
+            fileSizeLabel: "0 B",
+          },
+    [runtime, selectedProject],
   );
+
+  const mediaHandlers = {
+    onLoadedMetadata: () => {
+      if (pendingSeekRef.current !== null && mediaRef.current) {
+        mediaRef.current.currentTime = pendingSeekRef.current;
+        setCurrentTime(pendingSeekRef.current);
+        pendingSeekRef.current = null;
+      }
+    },
+    onTimeUpdate: () => {
+      setCurrentTime(mediaRef.current?.currentTime ?? 0);
+    },
+    onPlay: () => setIsPlaying(true),
+    onPause: () => setIsPlaying(false),
+  };
 
   return {
     inputRef,
-    stage,
-    message,
-    detail,
-    progress,
-    mediaProgress,
-    progressItems,
-    currentFile,
-    transcript,
+    mediaRef,
+    transcriptSearchRef,
+    librarySearchRef,
+    projects,
+    projectGroups,
+    selectedProject,
+    transcriptSegments,
+    transcriptTurns,
     partialTranscript,
-    error,
+    mediaUrl,
+    currentTime,
+    isPlaying,
+    currentProjectMarks,
+    focusedSegment,
+    focusedSegmentId,
+    playbackSegmentId,
+    transcriptSearchResults,
+    librarySearchResults,
+    libraryQuery,
+    transcriptQuery,
+    currentFileMeta,
+    capabilityIssue,
+    runtime,
+    assetSetup,
     dragActive,
     copied,
-    runtime,
-    capabilityIssue,
+    notice,
+    assetProgressItems,
+    queuedProjects,
     isBusy,
     accept: getInputAcceptValue(),
-    sessionSummary,
+    workspaceReady,
     openFilePicker,
     onFileInputChange,
     onDrop,
     onDragOver: (event: React.DragEvent<HTMLElement>) => {
       event.preventDefault();
-      if (!isBusy) {
-        setDragActive(true);
-      }
+      setDragActive(true);
     },
     onDragLeave: (event: React.DragEvent<HTMLElement>) => {
       event.preventDefault();
       setDragActive(false);
     },
-    onReset: () => resetState(isBusy),
     onCopyTranscript,
     onDownloadTranscript,
+    selectProject,
+    seekToTime,
+    seekByDelta,
+    selectSegment,
+    selectAdjacentSegment,
+    jumpToTranscriptMatch,
+    renameSelectedProject,
+    updateSelectedSegmentText,
+    toggleBookmark: () => upsertMark("bookmark"),
+    toggleHighlight: (color: HighlightColor) => upsertMark("highlight", color),
+    primeTranscriptionModel,
+    primeMediaRuntime,
+    retryProject,
+    removeProject,
+    openLibrarySearchResult,
+    setLibraryQuery,
+    setTranscriptQuery,
+    setActiveSegmentId,
+    setNotice,
+    mediaHandlers,
   };
 }

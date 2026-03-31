@@ -1,535 +1,2000 @@
 "use client";
 
-import { useDeferredValue } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  ArrowRight,
+  AudioLines,
+  Bookmark,
+  Calendar,
   CheckCircle2,
   Copy,
   Cpu,
   Download,
   FileAudio,
   FileText,
-  Grip,
-  HardDriveUpload,
+  FolderOpen,
+  Highlighter,
+  ListTodo,
+  MessageSquareText,
+  Pause,
+  Play,
   RotateCcw,
+  Search,
   ShieldCheck,
   Sparkles,
-  AudioLines,
-  Upload,
+  TextCursorInput,
+  Trash2,
   Video,
+  Waves,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { useTranscribble } from "@/hooks/use-transcribble";
-import { APP_NAME, LOCAL_PROCESSING_NOTE, MAX_FILE_SIZE_LABEL, SUPPORTED_EXTENSIONS } from "@/lib/transcribble/constants";
+import { APP_NAME, LOCAL_PROCESSING_NOTE } from "@/lib/transcribble/constants";
+import type { ExportFormat } from "@/lib/transcribble/export";
 import { formatDuration } from "@/lib/transcribble/transcript";
+import type {
+  HighlightColor,
+  LibrarySearchResult,
+  TranscriptChapter,
+  TranscriptMark,
+  TranscriptProject,
+  TranscriptSegment,
+  TranscriptTurn,
+} from "@/lib/transcribble/types";
 
-const STEP_ITEMS = [
-  {
-    key: "idle",
-    label: "Upload media",
-    icon: Upload,
-  },
-  {
-    key: "transcribing",
-    label: "Process locally",
-    icon: Cpu,
-  },
-  {
-    key: "success",
-    label: "Review transcript",
-    icon: FileText,
-  },
-] as const;
-
-const DETAIL_CARDS = [
-  {
-    title: "First run",
-    copy: "The browser caches local model files after the first download.",
-    icon: Sparkles,
-  },
-  {
-    title: "Best results",
-    copy: "Clear speech and lighter background noise produce cleaner transcripts.",
-    icon: AudioLines,
-  },
-  {
-    title: "Large uploads",
-    copy: "Long videos stay private, but they still take time and memory to process locally.",
-    icon: Video,
-  },
-];
+const EXPORT_FORMATS: ExportFormat[] = ["txt", "md", "srt", "vtt"];
+type InspectorTab = "selection" | "outline" | "insights" | "session";
 
 export function TranscribbleApp() {
   const {
-    accept,
-    capabilityIssue,
-    copied,
-    currentFile,
-    detail,
-    dragActive,
-    error,
     inputRef,
-    isBusy,
-    mediaProgress,
-    message,
+    mediaRef,
+    transcriptSearchRef,
+    librarySearchRef,
+    projects,
+    projectGroups,
+    selectedProject,
+    transcriptSegments,
+    transcriptTurns,
+    partialTranscript,
+    mediaUrl,
+    currentTime,
+    isPlaying,
+    currentProjectMarks,
+    focusedSegment,
+    focusedSegmentId,
+    playbackSegmentId,
+    transcriptSearchResults,
+    librarySearchResults,
+    libraryQuery,
+    transcriptQuery,
+    currentFileMeta,
+    capabilityIssue,
+    runtime,
+    assetSetup,
+    dragActive,
+    copied,
+    notice,
+    assetProgressItems,
+    queuedProjects,
+    workspaceReady,
+    accept,
+    openFilePicker,
+    onFileInputChange,
+    onDrop,
+    onDragOver,
+    onDragLeave,
     onCopyTranscript,
     onDownloadTranscript,
-    onDragLeave,
-    onDragOver,
-    onDrop,
-    onFileInputChange,
-    onReset,
-    openFilePicker,
-    partialTranscript,
-    progress,
-    progressItems,
-    runtime,
-    sessionSummary,
-    stage,
-    transcript,
+    selectProject,
+    selectSegment,
+    selectAdjacentSegment,
+    jumpToTranscriptMatch,
+    renameSelectedProject,
+    seekByDelta,
+    updateSelectedSegmentText,
+    toggleBookmark,
+    toggleHighlight,
+    primeTranscriptionModel,
+    primeMediaRuntime,
+    retryProject,
+    removeProject,
+    openLibrarySearchResult,
+    setLibraryQuery,
+    setTranscriptQuery,
+    setNotice,
+    mediaHandlers,
   } = useTranscribble();
 
-  const displayTranscript = useDeferredValue(transcript?.plainText ?? partialTranscript);
-  const hasTranscript = displayTranscript.trim().length > 0;
-  const isSuccess = stage === "success";
-  const primaryFileIcon =
-    currentFile?.name.toLowerCase().endsWith(".mp4") || currentFile?.name.toLowerCase().endsWith(".mov")
-      ? Video
-      : FileAudio;
+  const markMap = useMemo(() => {
+    const map = new Map<string, TranscriptMark[]>();
+
+    for (const mark of currentProjectMarks) {
+      const existing = map.get(mark.segmentId) ?? [];
+      existing.push(mark);
+      map.set(mark.segmentId, existing);
+    }
+
+    return map;
+  }, [currentProjectMarks]);
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("selection");
+  const [titleDraft, setTitleDraft] = useState("");
+
+  const selectedProjectInsights = selectedProject?.transcript?.insights;
+  const selectedProjectStats = selectedProject?.transcript?.stats;
+  const selectedProjectChapters = useMemo(
+    () => selectedProject?.transcript?.chapters ?? [],
+    [selectedProject?.transcript?.chapters],
+  );
+  const matchedSegmentIds = useMemo(
+    () => new Set(transcriptSearchResults.map((result) => result.entry.segmentId).filter(Boolean)),
+    [transcriptSearchResults],
+  );
+  const activeChapter = useMemo(
+    () =>
+      selectedProjectChapters.find(
+        (chapter) => currentTime >= chapter.start && currentTime <= chapter.end + 0.25,
+      ) ?? selectedProjectChapters[0] ?? null,
+    [currentTime, selectedProjectChapters],
+  );
+  const hasTranscript = Boolean(selectedProject?.transcript);
+  const attachMediaRef = (node: HTMLAudioElement | HTMLVideoElement | null) => {
+    mediaRef.current = node;
+  };
+
+  useEffect(() => {
+    setTitleDraft(selectedProject?.title ?? "");
+  }, [selectedProject?.id, selectedProject?.title]);
+
+  const currentProgress = useMemo(() => {
+    if (!selectedProject) {
+      return 0;
+    }
+
+    return selectedProject.status === "ready" ? 100 : selectedProject.progress;
+  }, [selectedProject]);
+
+  const emptyState = !selectedProject && projects.length === 0;
+
+  useEffect(() => {
+    if (!selectedProject) {
+      return;
+    }
+
+    const trimmed = titleDraft.trim();
+    if (!trimmed || trimmed === selectedProject.title) {
+      return;
+    }
+
+    const handle = window.setTimeout(() => {
+      renameSelectedProject(trimmed);
+    }, 320);
+
+    return () => window.clearTimeout(handle);
+  }, [renameSelectedProject, selectedProject, titleDraft]);
 
   return (
-    <div className="min-h-screen bg-white">
-      <header className="sticky top-0 z-20 border-b border-gray-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-[1600px] items-center justify-between gap-4 px-4 sm:px-6">
-          <div className="flex min-w-0 items-center gap-4">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-purple-600 to-blue-600">
-                <AudioLines className="h-4 w-4 text-white" />
+    <div className="min-h-screen bg-[#efe9dc] text-[#16171c]">
+      <div
+        className="relative min-h-screen"
+        onDrop={onDrop}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+      >
+        <header className="sticky top-0 z-20 border-b border-black/10 bg-[#13151a] text-white">
+          <div className="mx-auto flex max-w-[1800px] items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
+            <div className="flex min-w-0 items-center gap-4">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#1f4fff] shadow-[0_12px_30px_rgba(31,79,255,0.35)]">
+                <AudioLines className="h-5 w-5" />
               </div>
-              <span className="font-semibold text-gray-900">{APP_NAME}</span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg font-semibold tracking-tight">{APP_NAME}</span>
+                  <Badge className="border border-white/15 bg-white/10 text-white">Local-first audio workspace</Badge>
+                </div>
+                <div className="text-sm text-white/60">
+                  Transcript, timeline, memory, and evidence-linked outputs. No paid API in the core flow.
+                </div>
+              </div>
             </div>
-            <div className="hidden text-sm text-gray-500 sm:block">
-              <span>Workspace</span> <span className="mx-1">/</span> <span>Local transcription</span>
-            </div>
-          </div>
 
-          <div className="flex items-center gap-3">
-            <div className="relative hidden lg:block">
-              <ShieldCheck className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-              <Input
-                readOnly
-                value={LOCAL_PROCESSING_NOTE}
-                className="w-[360px] border-gray-200 bg-gray-50 pl-10 text-sm text-gray-600"
-              />
-            </div>
-            <div className="flex h-10 min-w-10 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-600">
-              <Cpu className="mr-2 h-4 w-4" />
-              <span className="hidden sm:inline">{runtime === "webgpu" ? "WebGPU" : "WASM"}</span>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <div className="flex flex-col lg:flex-row">
-        <aside className="border-b border-gray-200 bg-white lg:h-[calc(100vh-4rem)] lg:w-60 lg:overflow-y-auto lg:border-b-0 lg:border-r">
-          <div className="p-4">
-            <div className="relative mb-6">
-              <FileAudio className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-              <Input
-                readOnly
-                value={currentFile?.name ?? "Select media file"}
-                onClick={openFilePicker}
-                className="cursor-pointer border-gray-200 bg-gray-50 pl-10 text-sm text-gray-700"
-              />
-              <Button
-                size="icon"
-                variant="ghost"
-                onClick={openFilePicker}
-                className="absolute right-1 top-1/2 h-6 w-6 -translate-y-1/2"
-                disabled={isBusy}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                <ShieldCheck className="h-4 w-4 text-[#86efac]" />
+                <span>{LOCAL_PROCESSING_NOTE}</span>
+              </div>
+              <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm">
+                <Cpu className="h-4 w-4 text-[#a5b4fc]" />
+                <span>{runtime === "webgpu" ? "WebGPU local runtime" : "WASM local runtime"}</span>
+              </div>
+              <div className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                Queue {queuedProjects.length}
+              </div>
+              <div
+                className={`rounded-full border px-3 py-2 text-sm ${
+                  assetSetup.modelReady && assetSetup.mediaReady
+                    ? "border-[#2f5f38] bg-[#173321] text-[#bdf7c5]"
+                    : "border-white/10 bg-white/5 text-white/75"
+                }`}
               >
-                <ArrowRight className="h-3 w-3" />
+                {assetSetup.modelReady && assetSetup.mediaReady ? "Offline primed" : "Cold-start setup pending"}
+              </div>
+              <Button
+                onClick={openFilePicker}
+                className="bg-[#1f4fff] text-white hover:bg-[#1a43d6]"
+              >
+                <FolderOpen className="mr-2 h-4 w-4" />
+                Add media
               </Button>
             </div>
-
-            <nav className="space-y-1">
-              {STEP_ITEMS.map((item) => {
-                const isActive =
-                  (item.key === "idle" && (stage === "idle" || stage === "preparing")) ||
-                  (item.key === "transcribing" && (stage === "loading-model" || stage === "transcribing")) ||
-                  (item.key === "success" && stage === "success");
-
-                return (
-                  <button
-                    key={item.label}
-                    type="button"
-                    onClick={item.key === "idle" ? openFilePicker : undefined}
-                    className={`flex w-full items-center justify-start rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                      isActive ? "bg-purple-50 text-purple-700 hover:bg-purple-100" : "text-gray-600 hover:bg-gray-50"
-                    }`}
-                  >
-                    <item.icon className="mr-3 h-4 w-4" />
-                    {item.label}
-                  </button>
-                );
-              })}
-            </nav>
-
-            <div className="mt-6 space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
-              <div className="text-xs font-medium uppercase tracking-[0.18em] text-gray-500">Supported</div>
-              <div className="flex flex-wrap gap-2">
-                {SUPPORTED_EXTENSIONS.map((extension) => (
-                  <Badge key={extension} variant="secondary" className="bg-white text-gray-700">
-                    {extension.slice(1).toUpperCase()}
-                  </Badge>
-                ))}
-              </div>
-              <div className="text-sm text-gray-600">Recommended max size: {MAX_FILE_SIZE_LABEL}</div>
-            </div>
           </div>
-        </aside>
+        </header>
 
-        <main className="flex-1 bg-gray-50 p-4 sm:p-6 lg:p-8">
-          <div className="mx-auto max-w-[1600px] space-y-8">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-              <div>
-                <h1 className="text-2xl font-semibold text-gray-900 sm:text-3xl">
-                  Transcribe media privately, right in the browser.
-                </h1>
-                <p className="mt-2 max-w-3xl text-pretty text-sm text-gray-600 sm:text-base">
-                  Drop an audio or video file and {APP_NAME} will decode, extract, and transcribe it locally. No paid API,
-                  no server-side inference, and no extra setup once the model is cached.
-                </p>
-              </div>
-
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <Button
-                  onClick={openFilePicker}
-                  className="gap-2 bg-purple-600 hover:bg-purple-700"
-                  disabled={isBusy}
-                >
-                  <HardDriveUpload className="h-4 w-4" />
-                  Select file
-                </Button>
-                <Button variant="outline" onClick={onReset} className="gap-2 bg-transparent">
-                  <RotateCcw className="h-4 w-4" />
-                  Reset
-                </Button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
-              <InfoCard
-                icon={ShieldCheck}
-                title="On-device only"
-                body="Transcription runs locally in the browser and keeps paid APIs out of the flow."
-              />
-              <InfoCard
-                icon={Cpu}
-                title="Smart runtime"
-                body={
-                  runtime === "webgpu"
-                    ? "WebGPU acceleration is available for this browser."
-                    : "Running with a WebAssembly fallback for broader compatibility."
-                }
-              />
-              <InfoCard
-                icon={primaryFileIcon}
-                title="Accepted media"
-                body="MP3, WAV, M4A, MP4, and MOV are supported in a single upload flow."
-              />
-              <InfoCard
-                icon={FileText}
-                title="Plain-text output"
-                body="Copy it, download a `.txt`, or reset for the next transcript when you are done."
-              />
-            </div>
-
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.8fr)]">
-              <Card className="border-gray-200 shadow-sm">
-                <CardHeader className="pb-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <CardTitle className="text-xl">Drop a file and start</CardTitle>
-                      <CardDescription className="mt-1 text-sm">
-                        First use downloads a local model. After that, transcripts stay in-browser and reuse cached assets.
-                      </CardDescription>
-                    </div>
-                    {currentFile ? (
-                      <Badge variant="secondary" className="w-fit bg-purple-100 text-purple-700">
-                        {sessionSummary.fileMeta}
-                      </Badge>
-                    ) : null}
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-5">
-                  <button
-                    type="button"
-                    onClick={openFilePicker}
-                    onDrop={onDrop}
-                    onDragOver={onDragOver}
-                    onDragLeave={onDragLeave}
-                    disabled={isBusy}
-                    className={`group relative flex min-h-[260px] w-full flex-col items-center justify-center rounded-lg border border-dashed px-6 py-12 text-center transition-all duration-200 ${
-                      dragActive
-                        ? "border-purple-300 bg-purple-50 shadow-sm"
-                        : "border-gray-200 bg-white hover:border-purple-300 hover:bg-purple-50/40 hover:shadow-md"
-                    } ${isBusy ? "cursor-default" : "cursor-pointer"}`}
-                  >
-                    <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-purple-100 text-purple-700 transition-transform duration-200 group-hover:scale-[1.03]">
-                      <Grip className="h-6 w-6" />
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-lg font-medium text-gray-900">
-                        {currentFile ? currentFile.name : "Drag and drop media here"}
-                      </div>
-                      <div className="max-w-xl text-sm text-gray-600">
-                        {currentFile
-                          ? "The file stays on your device while the browser prepares and transcribes it."
-                          : "Or click to browse for an audio or video file. Supported: mp3, mp4, m4a, wav, mov."}
-                      </div>
-                    </div>
-                    {!currentFile ? (
-                      <div className="mt-6 flex flex-wrap justify-center gap-2">
-                        {SUPPORTED_EXTENSIONS.map((extension) => (
-                          <Badge key={extension} variant="secondary" className="bg-gray-100 text-gray-700">
-                            {extension}
-                          </Badge>
-                        ))}
-                      </div>
-                    ) : null}
-                  </button>
-
-                  <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">{message}</div>
-                        <div className="mt-1 text-sm text-gray-600">{error ?? detail}</div>
-                      </div>
-                      <Badge
-                        variant="secondary"
-                        className={
-                          error
-                            ? "bg-red-100 text-red-700"
-                            : isSuccess
-                              ? "bg-green-100 text-green-700"
-                              : "bg-purple-100 text-purple-700"
-                        }
-                      >
-                        {error ? "Needs attention" : isSuccess ? "Finished" : "Working locally"}
-                      </Badge>
-                    </div>
-
-                    <Progress value={error ? 100 : progress} className="h-2 bg-gray-200 [&>div]:bg-purple-600" />
-
-                    {mediaProgress !== null ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-xs text-gray-500">
-                          <span>Media prep</span>
-                          <span>{Math.round(mediaProgress)}%</span>
-                        </div>
-                        <Progress value={mediaProgress} className="h-1.5 bg-gray-200 [&>div]:bg-gray-900" />
-                      </div>
-                    ) : null}
-
-                    {progressItems.length > 0 ? (
-                      <div className="space-y-2">
-                        {progressItems.map((item) => (
-                          <div key={item.file} className="space-y-1">
-                            <div className="flex items-center justify-between text-xs text-gray-500">
-                              <span className="truncate pr-4">{item.file.split("/").at(-1) ?? item.file}</span>
-                              <span>{item.progress.toFixed(0)}%</span>
-                            </div>
-                            <Progress value={item.progress} className="h-1.5 bg-gray-200 [&>div]:bg-purple-600" />
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    {error ? (
-                      <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                        <div className="flex items-start gap-2">
-                          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                          <span>{error}</span>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <div className="space-y-6">
-                <Card className="border-gray-200 shadow-sm">
-                  <CardHeader>
-                    <CardTitle className="text-lg">Session</CardTitle>
-                    <CardDescription>Current file, runtime, and output details.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4 text-sm">
-                    <SessionRow label="File" value={sessionSummary.fileMeta} />
-                    <SessionRow label="Duration" value={sessionSummary.durationLabel} />
-                    <SessionRow label="Runtime" value={sessionSummary.runtimeLabel} />
-                    <SessionRow label="Model" value={sessionSummary.modelLabel} />
-                    <SessionRow label="Size" value={sessionSummary.fileSizeLabel} />
-                    <SessionRow
-                      label="Output"
-                      value={
-                        transcript
-                          ? `${transcript.wordCount} words · ${transcript.characterCount} characters`
-                          : "Transcript will appear here"
-                      }
-                    />
-                  </CardContent>
-                </Card>
-
-                <Card className="border-gray-200 shadow-sm">
-                  <CardHeader>
-                    <CardTitle className="text-lg">Local notes</CardTitle>
-                    <CardDescription>Short, practical guidance for local transcription.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-3 text-sm text-gray-600">
-                    <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-                      {capabilityIssue ?? LOCAL_PROCESSING_NOTE}
-                    </div>
-                    <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-                      Recent Chrome or Edge builds usually offer the smoothest WebGPU path. Other browsers fall back
-                      gracefully when possible.
-                    </div>
-                    <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-                      Very large videos can still hit browser memory limits because audio extraction and inference both
-                      happen locally.
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-
-            <Card className="border-gray-200 shadow-sm">
-              <CardHeader className="pb-4">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div>
-                    <CardTitle className="text-xl">Transcript</CardTitle>
-                    <CardDescription className="mt-1">
-                      {hasTranscript
-                        ? "Readable plain text with line breaks for easy scanning and export."
-                        : "When transcription completes, the browser will render the result here."}
-                    </CardDescription>
-                  </div>
-                  <div className="flex flex-wrap gap-3">
-                    <Button
-                      variant="outline"
-                      onClick={onCopyTranscript}
-                      disabled={!transcript}
-                      className="gap-2 bg-transparent"
-                    >
-                      <Copy className="h-4 w-4" />
-                      {copied ? "Copied" : "Copy transcript"}
-                    </Button>
-                    <Button
-                      onClick={onDownloadTranscript}
-                      disabled={!transcript}
-                      className="gap-2 bg-purple-600 hover:bg-purple-700"
-                    >
-                      <Download className="h-4 w-4" />
-                      Download .txt
-                    </Button>
-                  </div>
+        <div className="mx-auto grid max-w-[1800px] grid-cols-1 gap-5 px-4 py-5 sm:px-6 lg:grid-cols-[300px_minmax(0,1fr)_380px] lg:px-8">
+          <aside className="overflow-hidden rounded-[28px] border border-black/10 bg-[#faf7f1] shadow-[0_18px_60px_rgba(30,35,45,0.08)]">
+            <div className="border-b border-black/10 px-5 py-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6e6a61]">Library</div>
+                  <div className="mt-1 text-xl font-semibold tracking-tight">Projects and queue</div>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <div className="min-h-[320px] rounded-lg border border-gray-200 bg-gray-50 p-5">
-                  {hasTranscript ? (
-                    <div className="space-y-4">
-                      {transcript ? (
-                        <div className="flex flex-wrap gap-2">
-                          <Badge variant="secondary" className="bg-white text-gray-700">
-                            {transcript.wordCount} words
-                          </Badge>
-                          <Badge variant="secondary" className="bg-white text-gray-700">
-                            {transcript.characterCount} characters
-                          </Badge>
-                          <Badge variant="secondary" className="bg-white text-gray-700">
-                            {formatDuration(transcript.duration)}
-                          </Badge>
-                        </div>
-                      ) : null}
-                      <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-7 text-gray-800">
-                        {displayTranscript}
-                      </pre>
-                    </div>
+                <Badge className="border border-black/10 bg-white text-[#242831]">{projects.length} saved</Badge>
+              </div>
+
+              <div className="mt-4 relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8b877e]" />
+                <Input
+                  ref={librarySearchRef}
+                  value={libraryQuery}
+                  onChange={(event) => setLibraryQuery(event.target.value)}
+                  placeholder="Search across projects and transcript spans"
+                  className="border-black/10 bg-white pl-10 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="max-h-[calc(100vh-11rem)] overflow-y-auto px-3 py-4">
+              {capabilityIssue ? (
+                <Banner tone="error" body={capabilityIssue} onDismiss={() => setNotice(null)} />
+              ) : null}
+              {notice ? <Banner tone={notice.tone} body={notice.message} onDismiss={() => setNotice(null)} /> : null}
+
+              {libraryQuery.trim() ? (
+                <section className="space-y-3 px-2">
+                  <SectionHeading icon={Search} title="Cross-project matches" />
+                  {librarySearchResults.length > 0 ? (
+                    librarySearchResults.map((result) => (
+                      <SearchResultRow
+                        key={`${result.projectId}-${result.entry.segmentId}-${result.entry.start}`}
+                        result={result}
+                        isActive={result.projectId === selectedProject?.id && result.entry.segmentId === focusedSegmentId}
+                        onOpen={() => openLibrarySearchResult(result)}
+                      />
+                    ))
                   ) : (
-                    <div className="flex h-full min-h-[280px] flex-col items-center justify-center text-center">
-                      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-purple-700 shadow-sm">
-                        <FileText className="h-5 w-5" />
-                      </div>
-                      <div className="text-lg font-medium text-gray-900">No transcript yet</div>
-                      <div className="mt-2 max-w-xl text-sm text-gray-600">
-                        Upload a file to generate a local transcript with copy, download, and reset controls when it
-                        finishes.
-                      </div>
-                    </div>
+                    <EmptyPanel
+                      title="No matches yet"
+                      body="Search scans saved project titles and local transcript spans."
+                    />
                   )}
-                </div>
-              </CardContent>
-            </Card>
+                </section>
+              ) : (
+                <div className="space-y-6">
+                  <section className="space-y-3 px-2">
+                    <SectionHeading icon={Waves} title="Active queue" />
+                    {projectGroups.active.length > 0 ? (
+                      projectGroups.active.map((project) => (
+                        <ProjectRow
+                          key={project.id}
+                          project={project}
+                          selected={project.id === selectedProject?.id}
+                          onOpen={() => selectProject(project.id)}
+                          onRetry={() => retryProject(project.id)}
+                          onDelete={() => removeProject(project.id)}
+                        />
+                      ))
+                    ) : (
+                      <EmptyPanel
+                        title="Nothing in flight"
+                        body="Drop multiple files and the workspace will process them locally in order."
+                      />
+                    )}
+                  </section>
 
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-              {DETAIL_CARDS.map((card) => (
-                <Card key={card.title} className="border-gray-200 shadow-sm transition-shadow hover:shadow-md">
-                  <CardContent className="p-6">
-                    <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-purple-100">
-                      <card.icon className="h-5 w-5 text-purple-600" />
+                  <section className="space-y-3 px-2">
+                    <SectionHeading icon={CheckCircle2} title="Ready to revisit" />
+                    {projectGroups.ready.length > 0 ? (
+                      projectGroups.ready.map((project) => (
+                        <ProjectRow
+                          key={project.id}
+                          project={project}
+                          selected={project.id === selectedProject?.id}
+                          onOpen={() => selectProject(project.id)}
+                          onRetry={() => retryProject(project.id)}
+                          onDelete={() => removeProject(project.id)}
+                        />
+                      ))
+                    ) : (
+                      <EmptyPanel
+                        title="Your local library starts here"
+                        body="Completed sessions stay saved locally for search, export, and later review."
+                      />
+                    )}
+                  </section>
+
+                  {projectGroups.errored.length > 0 ? (
+                    <section className="space-y-3 px-2">
+                      <SectionHeading icon={AlertTriangle} title="Needs attention" />
+                      {projectGroups.errored.map((project) => (
+                        <ProjectRow
+                          key={project.id}
+                          project={project}
+                          selected={project.id === selectedProject?.id}
+                          onOpen={() => selectProject(project.id)}
+                          onRetry={() => retryProject(project.id)}
+                          onDelete={() => removeProject(project.id)}
+                        />
+                      ))}
+                    </section>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          </aside>
+
+          <main className="min-w-0 space-y-5">
+            <WorkspaceSurface className="overflow-hidden">
+              {workspaceReady ? (
+                emptyState ? (
+                  <div className="flex min-h-[70vh] flex-col items-center justify-center px-8 py-16 text-center">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-[#1f4fff] text-white shadow-[0_16px_40px_rgba(31,79,255,0.28)]">
+                      <AudioLines className="h-7 w-7" />
                     </div>
-                    <div className="font-medium text-gray-900">{card.title}</div>
-                    <div className="mt-2 text-sm text-gray-600">{card.copy}</div>
-                  </CardContent>
-                </Card>
-              ))}
+                    <div className="mt-8 text-xs font-semibold uppercase tracking-[0.26em] text-[#6f6a60]">
+                      Privacy-first workspace
+                    </div>
+                    <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-[#101218] sm:text-5xl">
+                      Turn raw audio into a searchable local workspace.
+                    </h1>
+                    <p className="mt-4 max-w-2xl text-pretty text-base leading-7 text-[#5c5a52]">
+                      Queue recordings, revisit prior sessions, edit timestamped segments, save moments, export usable
+                      artifacts, and keep the entire core workflow on-device.
+                    </p>
+                    <div className="mt-8 flex flex-wrap justify-center gap-3">
+                      <Button
+                        onClick={openFilePicker}
+                        className="bg-[#1f4fff] text-white hover:bg-[#1a43d6]"
+                      >
+                        <FolderOpen className="mr-2 h-4 w-4" />
+                        Add local media
+                      </Button>
+                      <Badge className="border border-black/10 bg-white px-4 py-2 text-[#2b2d35]">
+                        Queue multiple files, keep everything local
+                      </Badge>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,360px)]">
+                    <div className="min-w-0 space-y-5 border-b border-black/10 px-5 py-5 xl:border-b-0 xl:border-r">
+                      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-semibold uppercase tracking-[0.24em] text-[#6d6a61]">
+                            Workspace
+                          </div>
+                          <Input
+                            value={titleDraft}
+                            onChange={(event) => setTitleDraft(event.target.value)}
+                            onBlur={() => setTitleDraft((current) => current.trim() || selectedProject?.title || "")}
+                            className="mt-2 h-auto border-0 bg-transparent px-0 text-3xl font-semibold tracking-tight shadow-none focus-visible:ring-0"
+                            placeholder="Project title"
+                          />
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-[#5c5a52]">
+                            <span>{selectedProject?.sourceName}</span>
+                            <span className="text-[#bab4aa]">•</span>
+                            <span>{currentFileMeta.fileSizeLabel}</span>
+                            <span className="text-[#bab4aa]">•</span>
+                            <span>{currentFileMeta.durationLabel}</span>
+                            <span className="text-[#bab4aa]">•</span>
+                            <span>{currentFileMeta.runtimeLabel}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <StatusBadge status={selectedProject?.status ?? "queued"} />
+                          <Badge className="border border-black/10 bg-white text-[#2b2d35]">
+                            {selectedProjectStats
+                              ? `${selectedProjectStats.wordCount} words`
+                              : "Waiting for transcript"}
+                          </Badge>
+                          <Button variant="outline" className="bg-transparent" onClick={onCopyTranscript} disabled={!hasTranscript}>
+                            <Copy className="mr-2 h-4 w-4" />
+                            {copied ? "Copied" : "Copy"}
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="rounded-[26px] border border-black/10 bg-[#f3ede2] p-4">
+                        <div className="flex flex-col gap-5">
+                          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-3">
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  className="h-12 w-12 rounded-full bg-[#16181d] text-white hover:bg-[#0f1115]"
+                                  onClick={() => {
+                                    if (!mediaRef.current) {
+                                      return;
+                                    }
+
+                                    if (mediaRef.current.paused) {
+                                      void mediaRef.current.play();
+                                    } else {
+                                      mediaRef.current.pause();
+                                    }
+                                  }}
+                                  disabled={!mediaUrl}
+                                >
+                                  {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="bg-white/70"
+                                  onClick={() => seekByDelta(-5)}
+                                  disabled={!mediaUrl}
+                                >
+                                  -5s
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="bg-white/70"
+                                  onClick={() => seekByDelta(5)}
+                                  disabled={!mediaUrl}
+                                >
+                                  +5s
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="bg-white/70"
+                                  onClick={() => selectAdjacentSegment(-1)}
+                                  disabled={!hasTranscript}
+                                >
+                                  Previous segment
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="bg-white/70"
+                                  onClick={() => selectAdjacentSegment(1)}
+                                  disabled={!hasTranscript}
+                                >
+                                  Next segment
+                                </Button>
+                              </div>
+
+                              <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-[#5c5a52]">
+                                <span className="font-medium text-[#171a20]">Transport</span>
+                                <span>{formatDuration(currentTime)} / {currentFileMeta.durationLabel}</span>
+                                {activeChapter ? (
+                                  <>
+                                    <span className="text-[#bab4aa]">•</span>
+                                    <span>Active chapter: {activeChapter.title}</span>
+                                  </>
+                                ) : null}
+                              </div>
+
+                              <div className="mt-4">
+                                <Progress value={currentProgress} className="h-2 bg-black/10 [&>div]:bg-[#1f4fff]" />
+                                <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-sm text-[#5c5a52]">
+                                  <span>{selectedProject?.stageLabel}</span>
+                                  <span>{selectedProject?.detail}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                              {EXPORT_FORMATS.map((format) => (
+                                <Button
+                                  key={format}
+                                  variant="outline"
+                                  className="bg-white/70 uppercase tracking-[0.18em] text-[#2b2d35]"
+                                  onClick={() => onDownloadTranscript(format)}
+                                  disabled={!hasTranscript}
+                                >
+                                  <Download className="mr-2 h-4 w-4" />
+                                  {format}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <TimelineOverview
+                            duration={selectedProjectStats?.duration ?? selectedProject?.duration ?? 0}
+                            currentTime={currentTime}
+                            segments={transcriptSegments}
+                            turns={transcriptTurns}
+                            chapters={selectedProjectChapters}
+                            marks={currentProjectMarks}
+                            matchedSegmentIds={matchedSegmentIds}
+                            focusedSegmentId={focusedSegmentId}
+                            playbackSegmentId={playbackSegmentId}
+                            onSeek={selectSegment}
+                          />
+
+                          {assetProgressItems.length > 0 ? (
+                            <div className="space-y-2 border-t border-black/10 pt-4">
+                              {assetProgressItems.map((item) => (
+                                <div key={item.file} className="space-y-1">
+                                  <div className="flex items-center justify-between text-xs uppercase tracking-[0.18em] text-[#6e6a61]">
+                                    <span className="truncate pr-4">{item.file.split("/").at(-1) ?? item.file}</span>
+                                    <span>{item.progress.toFixed(0)}%</span>
+                                  </div>
+                                  <Progress value={item.progress} className="h-1.5 bg-black/10 [&>div]:bg-[#16181d]" />
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+
+                          <div className="overflow-hidden rounded-[20px] border border-black/10 bg-black/5">
+                          {mediaUrl ? (
+                            selectedProject?.mediaKind === "video" ? (
+                              <video
+                                ref={attachMediaRef}
+                                src={mediaUrl}
+                                controls
+                                className="aspect-video w-full bg-black"
+                                onLoadedMetadata={mediaHandlers.onLoadedMetadata}
+                                onTimeUpdate={mediaHandlers.onTimeUpdate}
+                                onPlay={mediaHandlers.onPlay}
+                                onPause={mediaHandlers.onPause}
+                              />
+                            ) : (
+                              <div className="p-5">
+                                <audio
+                                  ref={attachMediaRef}
+                                  src={mediaUrl}
+                                  controls
+                                  className="w-full"
+                                  onLoadedMetadata={mediaHandlers.onLoadedMetadata}
+                                  onTimeUpdate={mediaHandlers.onTimeUpdate}
+                                  onPlay={mediaHandlers.onPlay}
+                                  onPause={mediaHandlers.onPause}
+                                />
+                              </div>
+                            )
+                          ) : (
+                            <div className="flex min-h-[180px] items-center justify-center px-6 py-10 text-center text-[#5c5a52]">
+                              The source media is stored locally and will appear here when the project is selected.
+                            </div>
+                          )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-[26px] border border-black/10 bg-[#fcfbf7]">
+                        <div className="border-b border-black/10 px-5 py-4">
+                          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                            <div>
+                              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-[#6d6a61]">
+                                Transcript timeline
+                              </div>
+                              <div className="mt-1 text-lg font-semibold tracking-tight">
+                                Timestamped segments with click-to-seek
+                              </div>
+                            </div>
+
+                            <div className="relative w-full max-w-md">
+                              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8b877e]" />
+                              <Input
+                                ref={transcriptSearchRef}
+                                value={transcriptQuery}
+                                onChange={(event) => setTranscriptQuery(event.target.value)}
+                                placeholder="Search inside this transcript"
+                                className="border-black/10 bg-white pl-10 text-sm"
+                              />
+                            </div>
+
+                            {transcriptQuery.trim() ? (
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="bg-white"
+                                  onClick={() => jumpToTranscriptMatch(-1)}
+                                  disabled={transcriptSearchResults.length === 0}
+                                >
+                                  Previous match
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="bg-white"
+                                  onClick={() => jumpToTranscriptMatch(1)}
+                                  disabled={transcriptSearchResults.length === 0}
+                                >
+                                  Next match
+                                </Button>
+                              </div>
+                            ) : null}
+                          </div>
+
+                          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[#5c5a52]">
+                            <Badge className="border border-black/10 bg-white text-[#2b2d35]">
+                              {hasTranscript ? `${transcriptSegments.length} segments` : "Waiting for transcript"}
+                            </Badge>
+                            {selectedProjectStats ? (
+                              <>
+                                <Badge className="border border-black/10 bg-white text-[#2b2d35]">
+                                  {selectedProjectStats.turnCount} turns
+                                </Badge>
+                                <Badge className="border border-black/10 bg-white text-[#2b2d35]">
+                                  {selectedProjectStats.reviewCount} review cues
+                                </Badge>
+                                <Badge className="border border-black/10 bg-white text-[#2b2d35]">
+                                  {selectedProjectStats.speakingRateWpm} wpm
+                                </Badge>
+                              </>
+                            ) : null}
+                            {transcriptQuery.trim() ? (
+                              <span>{transcriptSearchResults.length} match{transcriptSearchResults.length === 1 ? "" : "es"}</span>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <div className="max-h-[calc(100vh-24rem)] overflow-y-auto px-4 py-4">
+                          {hasTranscript ? (
+                            <div className="space-y-3">
+                              {transcriptSearchResults.length > 0 && transcriptQuery.trim() ? (
+                                <div className="mb-4 space-y-2 rounded-2xl border border-[#d6d0c3] bg-[#f6f1e7] p-3">
+                                  {transcriptSearchResults.slice(0, 6).map((result) => (
+                                    <button
+                                      key={`${result.entry.segmentId}-${result.entry.start}`}
+                                      type="button"
+                                      onClick={() => selectSegment(result.entry.segmentId)}
+                                      className="flex w-full items-start justify-between gap-3 rounded-2xl border border-black/5 bg-white px-3 py-3 text-left transition hover:border-[#1f4fff]/30 hover:bg-[#eef2ff]"
+                                    >
+                                      <div>
+                                        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[#6d6a61]">
+                                          Match
+                                        </div>
+                                        <div className="mt-1 text-sm text-[#232730]">
+                                          {highlightMatch(result.entry.text, transcriptQuery)}
+                                        </div>
+                                      </div>
+                                      <Badge className="border border-black/10 bg-white text-[#2b2d35]">
+                                        {formatDuration(result.entry.start)}
+                                      </Badge>
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : null}
+
+                              {transcriptSegments.map((segment) => (
+                                <TranscriptRow
+                                  key={segment.id}
+                                  segment={segment}
+                                  marks={markMap.get(segment.id) ?? []}
+                                  isFocused={segment.id === focusedSegmentId}
+                                  isPlaying={segment.id === playbackSegmentId}
+                                  isMatched={transcriptQuery.trim().length > 0 && matchedSegmentIds.has(segment.id)}
+                                  query={transcriptQuery}
+                                  onSelect={() => selectSegment(segment.id)}
+                                />
+                              ))}
+                            </div>
+                          ) : partialTranscript ? (
+                            <div className="space-y-4 rounded-[22px] border border-[#d9d1c2] bg-[#f6f1e7] p-5">
+                              <div className="text-sm font-medium text-[#1a1c23]">Live local transcript preview</div>
+                              <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-[#232730]">
+                                {partialTranscript}
+                              </pre>
+                            </div>
+                          ) : (
+                            <EmptyPanel
+                              title="Transcript workspace is waiting"
+                              body="Choose or queue local media to populate the timeline, search index, and evidence-linked outputs."
+                              icon={FileText}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="max-h-[calc(100vh-8rem)] overflow-y-auto px-5 py-5">
+                      <div className="rounded-[26px] border border-black/10 bg-[#fcfbf7] p-3">
+                        <div className="grid grid-cols-2 gap-2">
+                          <InspectorTabButton
+                            active={inspectorTab === "selection"}
+                            onClick={() => setInspectorTab("selection")}
+                            label="Selection"
+                          />
+                          <InspectorTabButton
+                            active={inspectorTab === "outline"}
+                            onClick={() => setInspectorTab("outline")}
+                            label="Outline"
+                          />
+                          <InspectorTabButton
+                            active={inspectorTab === "insights"}
+                            onClick={() => setInspectorTab("insights")}
+                            label="Insights"
+                          />
+                          <InspectorTabButton
+                            active={inspectorTab === "session"}
+                            onClick={() => setInspectorTab("session")}
+                            label="Session"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="mt-5 space-y-5">
+                        {inspectorTab === "selection" ? (
+                          <WorkspaceSection
+                            eyebrow="Selection"
+                            title={focusedSegment ? "Edit the current segment" : "No segment selected"}
+                            description="Edits autosave locally and preserve timestamps."
+                          >
+                            {focusedSegment ? (
+                              <SegmentEditor
+                                key={focusedSegment.id}
+                                segment={focusedSegment}
+                                marks={markMap.get(focusedSegment.id) ?? []}
+                                onSave={updateSelectedSegmentText}
+                                onBookmark={toggleBookmark}
+                                onHighlight={toggleHighlight}
+                              />
+                            ) : (
+                              <EmptyPanel
+                                title="Pick a line from the timeline"
+                                body="Selecting a segment lets you edit it, bookmark it, or save a highlight."
+                                icon={TextCursorInput}
+                              />
+                            )}
+                          </WorkspaceSection>
+                        ) : null}
+
+                        {inspectorTab === "outline" ? (
+                          <WorkspaceSection
+                            eyebrow="Outline"
+                            title="Chapters, turns, and saved moments"
+                            description="Pause-derived turns are explicit so future speaker attribution can slot in cleanly."
+                          >
+                            <TurnMap
+                              turns={transcriptTurns}
+                              focusedSegmentId={focusedSegmentId}
+                              onOpenTurn={(turn) => selectSegment(turn.segmentIds[0] ?? "")}
+                            />
+
+                            <div className="mt-5 space-y-3">
+                              <SectionHeading icon={Waves} title="Chapters" />
+                              {selectedProjectChapters.length > 0 ? (
+                                selectedProjectChapters.map((chapter) => (
+                                  <button
+                                    key={chapter.id}
+                                    type="button"
+                                    onClick={() => selectSegment(chapter.segmentIds[0] ?? "")}
+                                    className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-left transition hover:border-[#1f4fff]/30 hover:bg-[#eef2ff]"
+                                  >
+                                    <div className="flex items-center justify-between gap-3">
+                                      <div className="font-medium text-[#171a20]">{chapter.title}</div>
+                                      <Badge className="border border-black/10 bg-[#f6f1e7] text-[#2b2d35]">
+                                        {formatDuration(chapter.start)}
+                                      </Badge>
+                                    </div>
+                                    <div className="mt-2 text-sm text-[#5c5a52]">{chapter.summary}</div>
+                                  </button>
+                                ))
+                              ) : (
+                                <EmptyPanel
+                                  title="No outline yet"
+                                  body="Chapters appear automatically once the transcript is ready."
+                                />
+                              )}
+                            </div>
+
+                            <div className="mt-5 space-y-3">
+                              <SectionHeading icon={Bookmark} title="Saved moments" />
+                              {currentProjectMarks.length > 0 ? (
+                                currentProjectMarks.map((mark) => (
+                                  <button
+                                    key={mark.id}
+                                    type="button"
+                                    onClick={() => selectSegment(mark.segmentId)}
+                                    className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-left transition hover:border-[#1f4fff]/30 hover:bg-[#eef2ff]"
+                                  >
+                                    <div className="flex items-center justify-between gap-3">
+                                      <div className="font-medium text-[#171a20]">{mark.label}</div>
+                                      <Badge className="border border-black/10 bg-[#f6f1e7] text-[#2b2d35]">
+                                        {mark.kind}
+                                      </Badge>
+                                    </div>
+                                  </button>
+                                ))
+                              ) : (
+                                <EmptyPanel
+                                  title="Nothing saved yet"
+                                  body="Bookmarks and highlights help turn a transcript into a reusable working document."
+                                />
+                              )}
+                            </div>
+                          </WorkspaceSection>
+                        ) : null}
+
+                        {inspectorTab === "insights" ? (
+                          <WorkspaceSection
+                            eyebrow="Intelligence"
+                            title="Grounded local outputs"
+                            description="Every list below links back to a transcript span or timestamp."
+                          >
+                            <InsightList
+                              icon={Sparkles}
+                              title="Summary"
+                              items={
+                                selectedProjectInsights?.summary.map((item) => ({
+                                  id: item.id,
+                                  label: item.text,
+                                  meta: formatDuration(item.reference.start),
+                                  onOpen: () => selectSegment(item.reference.segmentId),
+                                })) ?? []
+                              }
+                            />
+                            <InsightList
+                              icon={ListTodo}
+                              title="Action items"
+                              items={
+                                selectedProjectInsights?.actions.map((item) => ({
+                                  id: item.id,
+                                  label: item.text,
+                                  meta: item.dueLabel
+                                    ? `${item.dueLabel} · ${formatDuration(item.reference.start)}`
+                                    : formatDuration(item.reference.start),
+                                  onOpen: () => selectSegment(item.reference.segmentId),
+                                })) ?? []
+                              }
+                            />
+                            <InsightList
+                              icon={MessageSquareText}
+                              title="Questions"
+                              items={
+                                selectedProjectInsights?.questions.map((item) => ({
+                                  id: item.id,
+                                  label: item.text,
+                                  meta: formatDuration(item.reference.start),
+                                  onOpen: () => selectSegment(item.reference.segmentId),
+                                })) ?? []
+                              }
+                            />
+                            <InsightList
+                              icon={Calendar}
+                              title="Dates and deadlines"
+                              items={
+                                selectedProjectInsights?.dates.map((item) => ({
+                                  id: item.id,
+                                  label: item.label,
+                                  meta: item.normalizedDate
+                                    ? `${item.normalizedDate} · ${formatDuration(item.reference.start)}`
+                                    : formatDuration(item.reference.start),
+                                  onOpen: () => selectSegment(item.reference.segmentId),
+                                })) ?? []
+                              }
+                            />
+                            <InsightList
+                              icon={FileAudio}
+                              title="Key moments"
+                              items={
+                                selectedProjectInsights?.keyMoments.map((item) => ({
+                                  id: item.id,
+                                  label: item.title,
+                                  meta: `${item.reason} · ${formatDuration(item.reference.start)}`,
+                                  onOpen: () => selectSegment(item.reference.segmentId),
+                                })) ?? []
+                              }
+                            />
+                            <InsightTagSection
+                              title="Entities"
+                              tags={selectedProjectInsights?.entities.map((item) => ({
+                                id: item.id,
+                                label: `${item.label} · ${item.kind}`,
+                                onOpen: () => selectSegment(item.references[0]?.segmentId ?? ""),
+                              })) ?? []}
+                            />
+                            <InsightTagSection
+                              title="Glossary"
+                              tags={selectedProjectInsights?.glossary.map((item) => ({
+                                id: item.id,
+                                label: `${item.term} · ${item.count}x`,
+                                onOpen: () => selectSegment(item.references[0]?.segmentId ?? ""),
+                              })) ?? []}
+                            />
+                            <InsightList
+                              icon={AlertTriangle}
+                              title="Review cues"
+                              items={
+                                selectedProjectInsights?.reviewCues.map((item) => ({
+                                  id: item.id,
+                                  label: item.reason,
+                                  meta: `${item.severity} · ${formatDuration(item.reference.start)}`,
+                                  onOpen: () => selectSegment(item.reference.segmentId),
+                                })) ?? []
+                              }
+                            />
+                          </WorkspaceSection>
+                        ) : null}
+
+                        {inspectorTab === "session" ? (
+                          <WorkspaceSection
+                            eyebrow="Session"
+                            title="Project details and local setup"
+                            description="Everything in this workspace stays local, including the setup state needed for reliable offline reuse."
+                          >
+                            <StatsGrid
+                              stats={[
+                                ["File", currentFileMeta.fileMeta],
+                                ["Duration", currentFileMeta.durationLabel],
+                                ["Runtime", currentFileMeta.runtimeLabel],
+                                ["Model", currentFileMeta.modelLabel],
+                                ["Words", selectedProjectStats ? String(selectedProjectStats.wordCount) : "Pending"],
+                                ["Bookmarks", selectedProjectStats ? String(selectedProjectStats.bookmarkCount) : "0"],
+                                ["Highlights", selectedProjectStats ? String(selectedProjectStats.highlightCount) : "0"],
+                                ["Review cues", selectedProjectStats ? String(selectedProjectStats.reviewCount) : "0"],
+                              ]}
+                            />
+
+                            <div className="mt-5 rounded-2xl border border-black/10 bg-[#f6f1e7] p-4 text-sm text-[#5c5a52]">
+                              <div className="flex items-start gap-3">
+                                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#1f4fff]" />
+                                <div>
+                                  Media, transcripts, edits, bookmarks, and the search library stay local in browser
+                                  storage. No metered backend is required for the core workflow.
+                                </div>
+                              </div>
+                            </div>
+
+                            <SetupChecklist
+                              assetSetup={assetSetup}
+                              onPrimeModel={primeTranscriptionModel}
+                              onPrimeMedia={primeMediaRuntime}
+                            />
+
+                            <div className="mt-5 rounded-2xl border border-black/10 bg-white p-4">
+                              <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">
+                                Keyboard
+                              </div>
+                              <div className="mt-3 space-y-2 text-sm text-[#252932]">
+                                <Shortcut hint="Search transcript" keys={["/"]} />
+                                <Shortcut hint="Search library" keys={["Ctrl", "K"]} />
+                                <Shortcut hint="Play or pause" keys={["Space"]} />
+                                <Shortcut hint="Bookmark selection" keys={["B"]} />
+                                <Shortcut hint="Next or previous segment" keys={["J", "K"]} />
+                              </div>
+                            </div>
+                          </WorkspaceSection>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                )
+              ) : (
+                <div className="flex min-h-[60vh] items-center justify-center">
+                  <div className="text-sm text-[#5c5a52]">Loading local workspace…</div>
+                </div>
+              )}
+            </WorkspaceSurface>
+          </main>
+
+          <aside className="space-y-5">
+            <WorkspaceSurface className="p-5">
+              <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">Workspace notes</div>
+              <div className="mt-4 space-y-3 text-sm text-[#5c5a52]">
+                <InfoBox
+                  icon={ShieldCheck}
+                  title="Local persistence"
+                  body="Projects, source media, edits, and bookmarks are stored in the browser so you can close and reopen the workspace."
+                />
+                <InfoBox
+                  icon={Cpu}
+                  title="Cost profile"
+                  body="There is no paid API, no usage-based backend, and no per-minute transcription bill in the core workflow."
+                />
+                <InfoBox
+                  icon={Sparkles}
+                  title="Grounded outputs"
+                  body="Summaries, action items, questions, dates, glossary terms, and key moments all point back to transcript segments."
+                />
+              </div>
+            </WorkspaceSurface>
+
+            <WorkspaceSurface className="p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">Quick status</div>
+                  <div className="mt-1 text-lg font-semibold tracking-tight">What the workspace sees</div>
+                </div>
+                <Badge className="border border-black/10 bg-white text-[#2b2d35]">{projects.length} projects</Badge>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                <MiniStat label="Queued" value={String(projectGroups.active.filter((item) => item.status === "queued").length)} />
+                <MiniStat label="Transcribing" value={String(projectGroups.active.filter((item) => item.status === "transcribing" || item.status === "preparing" || item.status === "loading-model").length)} />
+                <MiniStat label="Ready" value={String(projectGroups.ready.length)} />
+                <MiniStat label="Errored" value={String(projectGroups.errored.length)} />
+              </div>
+            </WorkspaceSurface>
+          </aside>
+        </div>
+
+        <input
+          ref={inputRef}
+          type="file"
+          accept={accept}
+          multiple
+          className="hidden"
+          onChange={onFileInputChange}
+        />
+
+        {dragActive ? (
+          <div className="pointer-events-none fixed inset-0 z-30 flex items-center justify-center bg-[#10131f]/55 p-6 backdrop-blur-sm">
+            <div className="w-full max-w-xl rounded-[32px] border border-white/20 bg-white/10 px-8 py-12 text-center text-white shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-white/15">
+                <FolderOpen className="h-7 w-7" />
+              </div>
+              <div className="mt-5 text-sm font-semibold uppercase tracking-[0.28em] text-white/70">
+                Drop local media
+              </div>
+              <div className="mt-3 text-3xl font-semibold tracking-tight">Queue audio or video files into the workspace</div>
+              <div className="mt-3 text-sm text-white/75">
+                Files stay local. Saved sessions become searchable immediately after transcription.
+              </div>
             </div>
           </div>
-        </main>
+        ) : null}
       </div>
-
-      <input ref={inputRef} type="file" accept={accept} className="hidden" onChange={onFileInputChange} />
     </div>
   );
 }
 
-function InfoCard({
+function WorkspaceSurface({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section
+      className={`overflow-hidden rounded-[30px] border border-black/10 bg-[#faf7f1] shadow-[0_18px_60px_rgba(30,35,45,0.08)] ${className ?? ""}`}
+    >
+      {children}
+    </section>
+  );
+}
+
+function InspectorTabButton({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-2xl px-4 py-3 text-sm font-medium transition ${
+        active
+          ? "bg-[#16181d] text-white shadow-[0_10px_30px_rgba(22,24,29,0.18)]"
+          : "bg-white text-[#232730] hover:bg-[#eef2ff]"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function TimelineOverview({
+  duration,
+  currentTime,
+  segments,
+  turns,
+  chapters,
+  marks,
+  matchedSegmentIds,
+  focusedSegmentId,
+  playbackSegmentId,
+  onSeek,
+}: {
+  duration: number;
+  currentTime: number;
+  segments: TranscriptSegment[];
+  turns: TranscriptTurn[];
+  chapters: TranscriptChapter[];
+  marks: TranscriptMark[];
+  matchedSegmentIds: Set<string>;
+  focusedSegmentId: string | null;
+  playbackSegmentId: string | null;
+  onSeek: (segmentId: string) => void;
+}) {
+  const safeDuration = Math.max(duration, segments.at(-1)?.end ?? 0, 0);
+  const currentRatio = safeDuration > 0 ? Math.min(Math.max(currentTime / safeDuration, 0), 1) : 0;
+  const focusedSegment = segments.find((segment) => segment.id === focusedSegmentId) ?? null;
+  const playbackSegment = segments.find((segment) => segment.id === playbackSegmentId) ?? null;
+
+  const seekForRatio = (ratio: number) => {
+    const clampedRatio = Math.min(Math.max(ratio, 0), 1);
+    const targetTime = safeDuration * clampedRatio;
+    const targetSegment =
+      segments.find((segment) => targetTime >= segment.start && targetTime <= segment.end + 0.25) ??
+      segments.find((segment) => segment.start >= targetTime) ??
+      segments.at(-1);
+
+    if (targetSegment) {
+      onSeek(targetSegment.id);
+    }
+  };
+
+  if (!safeDuration || segments.length === 0) {
+    return (
+      <div className="rounded-[24px] border border-black/10 bg-white/60 px-4 py-4 text-sm text-[#5c5a52]">
+        The session map appears once timestamped segments are available.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-[24px] border border-[#10131a] bg-[#12151d] px-4 py-4 text-white shadow-[0_18px_50px_rgba(18,21,29,0.18)]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.22em] text-white/45">Session Map</div>
+          <div className="mt-1 text-base font-semibold tracking-tight">
+            Playback, chapters, turns, matches, and saved moments in one strip
+          </div>
+        </div>
+        <div className="text-xs uppercase tracking-[0.18em] text-white/45">
+          {chapters.length} chapters • {turns.length} pause-derived turns
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          const ratio = (event.clientX - rect.left) / rect.width;
+          seekForRatio(ratio);
+        }}
+        className="relative mt-4 block h-24 w-full overflow-hidden rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] text-left"
+      >
+        <div className="absolute inset-x-0 top-0 h-px bg-white/10" />
+        <div className="absolute inset-x-0 bottom-0 h-px bg-white/10" />
+        {chapters.map((chapter, index) => (
+          <div
+            key={chapter.id}
+            className={`absolute inset-y-3 rounded-2xl ${
+              index % 2 === 0 ? "bg-[#2f394c]/60" : "bg-[#212835]/65"
+            }`}
+            style={{
+              left: `${(chapter.start / safeDuration) * 100}%`,
+              width: `${Math.max(((chapter.end - chapter.start) / safeDuration) * 100, 3)}%`,
+            }}
+          />
+        ))}
+        {turns.map((turn) => (
+          <div
+            key={turn.id}
+            className="absolute bottom-0 top-0 w-px bg-white/14"
+            style={{ left: `${(turn.start / safeDuration) * 100}%` }}
+          />
+        ))}
+        {segments
+          .filter((segment) => matchedSegmentIds.has(segment.id))
+          .map((segment) => (
+            <div
+              key={`match-${segment.id}`}
+              className="absolute top-1 h-2 w-1 rounded-full bg-[#f8d66d]"
+              style={{ left: `${(segment.start / safeDuration) * 100}%` }}
+            />
+          ))}
+        {marks.map((mark) => {
+          const segment = segments.find((item) => item.id === mark.segmentId);
+          if (!segment) {
+            return null;
+          }
+
+          return (
+            <div
+              key={mark.id}
+              className={`absolute bottom-1 h-2 w-2 rounded-full ${
+                mark.kind === "bookmark"
+                  ? "bg-[#f8d66d]"
+                  : mark.color === "rose"
+                    ? "bg-[#ff97b3]"
+                    : mark.color === "sky"
+                      ? "bg-[#86c7ff]"
+                      : "bg-[#ffd670]"
+              }`}
+              style={{ left: `calc(${(segment.start / safeDuration) * 100}% - 4px)` }}
+            />
+          );
+        })}
+        {focusedSegment ? (
+          <div
+            className="absolute inset-y-4 rounded-2xl border border-[#86a4ff] bg-[#3452ad]/30"
+            style={{
+              left: `${(focusedSegment.start / safeDuration) * 100}%`,
+              width: `${Math.max(((focusedSegment.end - focusedSegment.start) / safeDuration) * 100, 1.5)}%`,
+            }}
+          />
+        ) : null}
+        {playbackSegment ? (
+          <div
+            className="absolute inset-y-6 rounded-2xl bg-[#5f8bff]/55"
+            style={{
+              left: `${(playbackSegment.start / safeDuration) * 100}%`,
+              width: `${Math.max(((playbackSegment.end - playbackSegment.start) / safeDuration) * 100, 0.75)}%`,
+            }}
+          />
+        ) : null}
+        <div
+          className="absolute inset-y-0 w-0.5 bg-white shadow-[0_0_0_1px_rgba(255,255,255,0.2)]"
+          style={{ left: `${currentRatio * 100}%` }}
+        />
+      </button>
+
+      <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/55">
+        <TimelineLegend colorClass="bg-[#5f8bff]" label="playback" />
+        <TimelineLegend colorClass="border border-[#86a4ff] bg-[#3452ad]/40" label="selection" />
+        <TimelineLegend colorClass="bg-[#f8d66d]" label="matches and bookmarks" />
+        <TimelineLegend colorClass="bg-white/25" label="pause-derived turns" />
+      </div>
+
+      {chapters.length > 0 ? (
+        <div className="mt-4 grid gap-2 md:grid-cols-2">
+          {chapters.slice(0, 4).map((chapter) => (
+            <button
+              key={chapter.id}
+              type="button"
+              onClick={() => onSeek(chapter.segmentIds[0] ?? "")}
+              className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left transition hover:bg-white/10"
+            >
+              <div className="text-sm font-medium text-white">{chapter.title}</div>
+              <div className="mt-1 text-xs uppercase tracking-[0.18em] text-white/45">
+                {formatDuration(chapter.start)} • {chapter.segmentIds.length} segments
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TimelineLegend({
+  colorClass,
+  label,
+}: {
+  colorClass: string;
+  label: string;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className={`block h-2.5 w-2.5 rounded-full ${colorClass}`} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function TurnMap({
+  turns,
+  focusedSegmentId,
+  onOpenTurn,
+}: {
+  turns: TranscriptTurn[];
+  focusedSegmentId: string | null;
+  onOpenTurn: (turn: TranscriptTurn) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <SectionHeading icon={AudioLines} title="Pause-derived turns" />
+      {turns.length > 0 ? (
+        turns.map((turn) => (
+          <button
+            key={turn.id}
+            type="button"
+            onClick={() => onOpenTurn(turn)}
+            className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
+              focusedSegmentId && turn.segmentIds.includes(focusedSegmentId)
+                ? "border-[#1f4fff]/35 bg-[#eef2ff]"
+                : "border-black/10 bg-white hover:border-[#1f4fff]/30 hover:bg-[#eef2ff]"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="font-medium text-[#171a20]">Turn {turn.index + 1}</div>
+              <Badge className="border border-black/10 bg-[#f6f1e7] text-[#2b2d35]">
+                {formatDuration(turn.start)}-{formatDuration(turn.end)}
+              </Badge>
+            </div>
+            <div className="mt-2 text-sm text-[#5c5a52]">
+              {turn.segmentIds.length} segments • {turn.wordCount} words • {turn.attribution}
+            </div>
+          </button>
+        ))
+      ) : (
+        <EmptyPanel
+          title="No turn map yet"
+          body="Turns are derived from pauses so future speaker attribution can build on an explicit structure."
+          icon={AudioLines}
+        />
+      )}
+    </div>
+  );
+}
+
+function SetupChecklist({
+  assetSetup,
+  onPrimeModel,
+  onPrimeMedia,
+}: {
+  assetSetup: {
+    modelReady: boolean;
+    mediaReady: boolean;
+    warmingModel: boolean;
+    warmingMedia: boolean;
+    online: boolean;
+    modelPrimedAt?: string;
+    mediaPrimedAt?: string;
+    lastError?: string;
+  };
+  onPrimeModel: () => void;
+  onPrimeMedia: () => void;
+}) {
+  const busy = assetSetup.warmingModel || assetSetup.warmingMedia;
+
+  return (
+    <div className="mt-5 rounded-2xl border border-black/10 bg-white p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">Local setup</div>
+          <div className="mt-1 text-base font-semibold tracking-tight text-[#171a20]">Prime this browser for offline reuse</div>
+        </div>
+        <Badge
+          className={`border ${
+            assetSetup.online
+              ? "border-[#c7d6ff] bg-[#eef2ff] text-[#1d3bb8]"
+              : "border-[#f3b3b3] bg-[#fff0ef] text-[#7c2626]"
+          }`}
+        >
+          {assetSetup.online ? "Online" : "Offline"}
+        </Badge>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        <SetupRow
+          title="Transcription model"
+          description={
+            assetSetup.modelReady
+              ? `Primed${assetSetup.modelPrimedAt ? ` on ${new Date(assetSetup.modelPrimedAt).toLocaleString()}` : ""}.`
+              : "Needed once per browser profile before strict offline use is reliable."
+          }
+          ready={assetSetup.modelReady}
+          loading={assetSetup.warmingModel}
+          disabled={busy}
+          buttonLabel="Prime model"
+          onClick={onPrimeModel}
+        />
+        <SetupRow
+          title="Media runtime"
+          description={
+            assetSetup.mediaReady
+              ? `Primed${assetSetup.mediaPrimedAt ? ` on ${new Date(assetSetup.mediaPrimedAt).toLocaleString()}` : ""}.`
+              : "Warms the video extraction and fallback runtime used for video imports or decode fallback."
+          }
+          ready={assetSetup.mediaReady}
+          loading={assetSetup.warmingMedia}
+          disabled={busy}
+          buttonLabel="Prime media"
+          onClick={onPrimeMedia}
+        />
+      </div>
+
+      {assetSetup.lastError ? (
+        <div className="mt-4 rounded-2xl border border-[#f3b3b3] bg-[#fff0ef] px-4 py-3 text-sm text-[#7c2626]">
+          {assetSetup.lastError}
+        </div>
+      ) : null}
+
+      <div className="mt-4 text-sm text-[#5c5a52]">
+        The core workflow stays local, but a brand-new browser profile still needs these assets fetched once. Priming
+        them here makes later offline sessions more dependable.
+      </div>
+    </div>
+  );
+}
+
+function SetupRow({
+  title,
+  description,
+  ready,
+  loading,
+  disabled,
+  buttonLabel,
+  onClick,
+}: {
+  title: string;
+  description: string;
+  ready: boolean;
+  loading: boolean;
+  disabled: boolean;
+  buttonLabel: string;
+  onClick: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-black/10 bg-[#fcfbf7] px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <div className="flex items-center gap-2 font-medium text-[#171a20]">
+          <span>{title}</span>
+          {ready ? <CheckCircle2 className="h-4 w-4 text-[#17643b]" /> : null}
+        </div>
+        <div className="mt-1 text-sm text-[#5c5a52]">{description}</div>
+      </div>
+      <Button variant="outline" className="bg-white" onClick={onClick} disabled={disabled}>
+        {loading ? "Priming…" : ready ? "Refresh cache" : buttonLabel}
+      </Button>
+    </div>
+  );
+}
+
+function Banner({
+  tone,
   body,
+  onDismiss,
+}: {
+  tone: "info" | "error";
+  body: string;
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      className={`mb-4 rounded-2xl border px-4 py-3 text-sm ${
+        tone === "error"
+          ? "border-[#f3b3b3] bg-[#fff0ef] text-[#7c2626]"
+          : "border-[#c7d6ff] bg-[#eef2ff] text-[#1d3bb8]"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>{body}</div>
+        <button type="button" onClick={onDismiss} className="shrink-0 text-current/60 transition hover:text-current">
+          <RotateCcw className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SectionHeading({
   icon: Icon,
   title,
 }: {
-  body: string;
-  icon: typeof ShieldCheck;
+  icon: typeof Search;
   title: string;
 }) {
   return (
-    <Card className="border-gray-200 shadow-sm">
-      <CardContent className="p-6">
-        <div className="mb-4 flex items-center justify-between">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100">
-            <Icon className="h-5 w-5 text-gray-600" />
-          </div>
-          <CheckCircle2 className="h-4 w-4 text-green-600" />
-        </div>
-        <div className="text-base font-medium text-gray-900">{title}</div>
-        <div className="mt-2 text-sm text-gray-600">{body}</div>
-      </CardContent>
-    </Card>
+    <div className="flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">
+      <Icon className="h-4 w-4" />
+      <span>{title}</span>
+    </div>
   );
 }
 
-function SessionRow({ label, value }: { label: string; value: string }) {
+function ProjectRow({
+  project,
+  selected,
+  onOpen,
+  onRetry,
+  onDelete,
+}: {
+  project: TranscriptProject;
+  selected: boolean;
+  onOpen: () => void;
+  onRetry: () => void;
+  onDelete: () => void;
+}) {
   return (
-    <div className="flex items-start justify-between gap-4">
-      <span className="text-gray-500">{label}</span>
-      <span className="max-w-[70%] text-right font-medium text-gray-900">{value}</span>
+    <div
+      className={`rounded-[22px] border px-4 py-4 transition ${
+        selected ? "border-[#1f4fff]/35 bg-[#eef2ff]" : "border-black/10 bg-white hover:border-[#1f4fff]/25 hover:bg-[#f8fbff]"
+      }`}
+    >
+      <button type="button" onClick={onOpen} className="w-full text-left">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate font-medium text-[#171a20]">{project.title}</div>
+            <div className="mt-1 flex items-center gap-2 text-sm text-[#5c5a52]">
+              {project.mediaKind === "video" ? <Video className="h-4 w-4" /> : <FileAudio className="h-4 w-4" />}
+              <span className="truncate">{project.sourceName}</span>
+            </div>
+          </div>
+          <StatusBadge status={project.status} />
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.18em] text-[#6d6a61]">
+          <span>{project.stageLabel}</span>
+          <span>•</span>
+          <span>{new Date(project.updatedAt).toLocaleString()}</span>
+        </div>
+
+        {project.status !== "ready" ? (
+          <div className="mt-3">
+            <Progress value={project.progress} className="h-1.5 bg-black/10 [&>div]:bg-[#1f4fff]" />
+            <div className="mt-2 text-sm text-[#5c5a52]">{project.detail}</div>
+          </div>
+        ) : project.transcript ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Badge className="border border-black/10 bg-[#f6f1e7] text-[#2b2d35]">
+              {project.transcript.stats.wordCount} words
+            </Badge>
+            <Badge className="border border-black/10 bg-[#f6f1e7] text-[#2b2d35]">
+              {project.transcript.stats.bookmarkCount + project.transcript.stats.highlightCount} saved marks
+            </Badge>
+          </div>
+        ) : null}
+      </button>
+
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <div className="text-xs text-[#6d6a61]">{project.error ?? project.detail}</div>
+        <div className="flex items-center gap-1">
+          {project.status === "error" ? (
+            <button type="button" onClick={onRetry} className="rounded-full p-2 text-[#2b2d35] transition hover:bg-black/5">
+              <RotateCcw className="h-4 w-4" />
+            </button>
+          ) : null}
+          <button type="button" onClick={onDelete} className="rounded-full p-2 text-[#2b2d35] transition hover:bg-black/5">
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
     </div>
+  );
+}
+
+function SearchResultRow({
+  result,
+  isActive,
+  onOpen,
+}: {
+  result: LibrarySearchResult;
+  isActive: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className={`w-full rounded-[22px] border px-4 py-4 text-left transition ${
+        isActive ? "border-[#1f4fff]/35 bg-[#eef2ff]" : "border-black/10 bg-white hover:border-[#1f4fff]/25 hover:bg-[#f8fbff]"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="font-medium text-[#171a20]">{result.projectTitle}</div>
+        <Badge className="border border-black/10 bg-[#f6f1e7] text-[#2b2d35]">
+          {result.matchKind === "title" ? "title" : formatDuration(result.entry.start)}
+        </Badge>
+      </div>
+      <div className="mt-2 text-sm text-[#232730]">
+        {result.matchKind === "title" ? "Project title match" : result.entry.text}
+      </div>
+      <div className="mt-3 text-xs uppercase tracking-[0.18em] text-[#6d6a61]">
+        {result.matchKind} match • score {result.score} • {new Date(result.projectUpdatedAt).toLocaleString()}
+      </div>
+    </button>
+  );
+}
+
+function TranscriptRow({
+  segment,
+  marks,
+  isFocused,
+  isPlaying,
+  isMatched,
+  query,
+  onSelect,
+}: {
+  segment: TranscriptSegment;
+  marks: TranscriptMark[];
+  isFocused: boolean;
+  isPlaying: boolean;
+  isMatched: boolean;
+  query: string;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`w-full rounded-[24px] border px-4 py-4 text-left transition ${
+        isFocused
+          ? "border-[#1f4fff]/35 bg-[#eef2ff]"
+          : isPlaying
+            ? "border-[#15181d]/20 bg-[#f4efe4]"
+            : "border-black/10 bg-white hover:border-[#1f4fff]/25 hover:bg-[#f8fbff]"
+      }`}
+      style={{ contentVisibility: "auto" }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge className="border border-black/10 bg-[#f6f1e7] text-[#2b2d35]">
+            {formatDuration(segment.start)}
+          </Badge>
+          <Badge className="border border-black/10 bg-white text-[#2b2d35]">turn {segment.turnIndex + 1}</Badge>
+          {marks.map((mark) => (
+            <Badge
+              key={mark.id}
+              className={`border ${
+                mark.kind === "bookmark"
+                  ? "border-[#d9c17b] bg-[#fff5d6] text-[#7e5b00]"
+                  : mark.color === "rose"
+                    ? "border-[#f3b1bc] bg-[#fff0f3] text-[#9a2340]"
+                    : mark.color === "sky"
+                      ? "border-[#b4d6ff] bg-[#eef7ff] text-[#174d97]"
+                      : "border-[#ebd37c] bg-[#fff8dd] text-[#7d6200]"
+              }`}
+            >
+              {mark.kind}
+            </Badge>
+          ))}
+          {segment.reviewReasons.length > 0 ? (
+            <Badge className="border border-[#f3b3b3] bg-[#fff0ef] text-[#7c2626]">review</Badge>
+          ) : null}
+          {isMatched ? (
+            <Badge className="border border-[#c7d6ff] bg-[#eef2ff] text-[#1d3bb8]">match</Badge>
+          ) : null}
+        </div>
+        {isPlaying ? <Waves className="mt-1 h-4 w-4 text-[#1f4fff]" /> : null}
+      </div>
+      <div className="mt-3 text-sm leading-7 text-[#232730]">{highlightMatch(segment.text, query)}</div>
+    </button>
+  );
+}
+
+function SegmentEditor({
+  segment,
+  marks,
+  onSave,
+  onBookmark,
+  onHighlight,
+}: {
+  segment: TranscriptSegment;
+  marks: TranscriptMark[];
+  onSave: (text: string) => void;
+  onBookmark: () => void;
+  onHighlight: (color: HighlightColor) => void;
+}) {
+  const [draft, setDraft] = useState(segment.text);
+  const draftWordCount = useMemo(
+    () => (draft.trim() ? draft.trim().split(/\s+/).length : 0),
+    [draft],
+  );
+
+  useEffect(() => {
+    setDraft(segment.text);
+  }, [segment.id, segment.text]);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      if (draft.trim() && draft !== segment.text) {
+        onSave(draft);
+      }
+    }, 420);
+
+    return () => window.clearTimeout(handle);
+  }, [draft, onSave, segment.text]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge className="border border-black/10 bg-[#f6f1e7] text-[#2b2d35]">
+          {formatDuration(segment.start)} to {formatDuration(segment.end)}
+        </Badge>
+        {marks.length > 0 ? (
+          marks.map((mark) => (
+            <Badge key={mark.id} className="border border-black/10 bg-white text-[#2b2d35]">
+              {mark.label}
+            </Badge>
+          ))
+        ) : (
+          <Badge className="border border-black/10 bg-white text-[#2b2d35]">Unsaved segment</Badge>
+        )}
+      </div>
+
+      <textarea
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        className="min-h-[180px] w-full rounded-[22px] border border-black/10 bg-white px-4 py-4 text-sm leading-7 text-[#232730] outline-none transition focus:border-[#1f4fff]/35 focus:ring-2 focus:ring-[#1f4fff]/15"
+      />
+
+      <div className="flex flex-wrap items-center justify-between gap-3 text-xs uppercase tracking-[0.18em] text-[#6d6a61]">
+        <span>Autosaves after a short pause</span>
+        <span>{draftWordCount} words</span>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" className="bg-white" onClick={onBookmark}>
+          <Bookmark className="mr-2 h-4 w-4" />
+          Toggle bookmark
+        </Button>
+        <Button variant="outline" className="bg-white" onClick={() => onHighlight("amber")}>
+          <Highlighter className="mr-2 h-4 w-4 text-[#c58b00]" />
+          Amber highlight
+        </Button>
+        <Button variant="outline" className="bg-white" onClick={() => onHighlight("sky")}>
+          <Highlighter className="mr-2 h-4 w-4 text-[#1d64c9]" />
+          Sky highlight
+        </Button>
+        <Button variant="outline" className="bg-white" onClick={() => onHighlight("rose")}>
+          <Highlighter className="mr-2 h-4 w-4 text-[#b42358]" />
+          Rose highlight
+        </Button>
+      </div>
+
+      {segment.reviewReasons.length > 0 ? (
+        <div className="rounded-2xl border border-[#f3b3b3] bg-[#fff0ef] p-4 text-sm text-[#7c2626]">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              {segment.reviewReasons.map((reason) => (
+                <div key={reason}>{reason}</div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function WorkspaceSection({
+  eyebrow,
+  title,
+  description,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-[26px] border border-black/10 bg-[#fcfbf7] p-5">
+      <div className="text-xs font-semibold uppercase tracking-[0.24em] text-[#6d6a61]">{eyebrow}</div>
+      <div className="mt-2 text-xl font-semibold tracking-tight text-[#171a20]">{title}</div>
+      <div className="mt-1 text-sm text-[#5c5a52]">{description}</div>
+      <div className="mt-5">{children}</div>
+    </section>
+  );
+}
+
+function InsightList({
+  icon: Icon,
+  title,
+  items,
+}: {
+  icon: typeof Sparkles;
+  title: string;
+  items: Array<{ id: string; label: string; meta: string; onOpen: () => void }>;
+}) {
+  return (
+    <div className="mt-4">
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">
+        <Icon className="h-4 w-4" />
+        <span>{title}</span>
+      </div>
+      <div className="mt-3 space-y-2">
+        {items.length > 0 ? (
+          items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={item.onOpen}
+              className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-left transition hover:border-[#1f4fff]/30 hover:bg-[#eef2ff]"
+            >
+              <div className="text-sm text-[#232730]">{item.label}</div>
+              <div className="mt-2 text-xs uppercase tracking-[0.18em] text-[#6d6a61]">{item.meta}</div>
+            </button>
+          ))
+        ) : (
+          <div className="rounded-2xl border border-dashed border-black/10 px-4 py-4 text-sm text-[#77736a]">
+            No items detected yet.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InsightTagSection({
+  title,
+  tags,
+}: {
+  title: string;
+  tags: Array<{ id: string; label: string; onOpen: () => void }>;
+}) {
+  return (
+    <div className="mt-4">
+      <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">{title}</div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {tags.length > 0 ? (
+          tags.map((tag) => (
+            <button
+              key={tag.id}
+              type="button"
+              onClick={tag.onOpen}
+              className="rounded-full border border-black/10 bg-white px-3 py-2 text-sm text-[#232730] transition hover:border-[#1f4fff]/30 hover:bg-[#eef2ff]"
+            >
+              {tag.label}
+            </button>
+          ))
+        ) : (
+          <div className="rounded-2xl border border-dashed border-black/10 px-4 py-4 text-sm text-[#77736a]">
+            No tags detected yet.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EmptyPanel({
+  title,
+  body,
+  icon: Icon = FolderOpen,
+}: {
+  title: string;
+  body: string;
+  icon?: typeof FolderOpen;
+}) {
+  return (
+    <div className="rounded-[22px] border border-dashed border-black/10 bg-[#f8f4eb] px-4 py-5 text-sm text-[#5c5a52]">
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-black/10 bg-white">
+          <Icon className="h-4 w-4 text-[#2b2d35]" />
+        </div>
+        <div>
+          <div className="font-medium text-[#171a20]">{title}</div>
+          <div className="mt-1">{body}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InfoBox({
+  icon: Icon,
+  title,
+  body,
+}: {
+  icon: typeof ShieldCheck;
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-black/10 bg-white p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#eef2ff] text-[#1f4fff]">
+          <Icon className="h-4 w-4" />
+        </div>
+        <div>
+          <div className="font-medium text-[#171a20]">{title}</div>
+          <div className="mt-1 text-sm text-[#5c5a52]">{body}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatsGrid({
+  stats,
+}: {
+  stats: Array<[string, string]>;
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      {stats.map(([label, value]) => (
+        <div key={label} className="rounded-2xl border border-black/10 bg-white px-4 py-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6d6a61]">{label}</div>
+          <div className="mt-2 text-sm text-[#232730]">{value}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatusBadge({
+  status,
+}: {
+  status: TranscriptProject["status"];
+}) {
+  const content =
+    status === "ready"
+      ? ["Ready", "border-[#b2dbbd] bg-[#ecfff1] text-[#17643b]"]
+      : status === "error"
+        ? ["Error", "border-[#f3b3b3] bg-[#fff0ef] text-[#7c2626]"]
+        : status === "queued"
+          ? ["Queued", "border-black/10 bg-white text-[#2b2d35]"]
+          : ["Working", "border-[#c7d6ff] bg-[#eef2ff] text-[#1d3bb8]"];
+
+  return <Badge className={`border ${content[1]}`}>{content[0]}</Badge>;
+}
+
+function MiniStat({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm">
+      <span className="text-[#5c5a52]">{label}</span>
+      <span className="font-medium text-[#171a20]">{value}</span>
+    </div>
+  );
+}
+
+function Shortcut({
+  hint,
+  keys,
+}: {
+  hint: string;
+  keys: string[];
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span>{hint}</span>
+      <div className="flex items-center gap-1">
+        {keys.map((key) => (
+          <span
+            key={key}
+            className="rounded-md border border-black/10 bg-[#f6f1e7] px-2 py-1 font-mono text-xs text-[#171a20]"
+          >
+            {key}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function highlightMatch(text: string, query: string) {
+  const normalizedQuery = query.trim().toLowerCase();
+
+  if (!normalizedQuery) {
+    return text;
+  }
+
+  const escapedQuery = normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const parts = text.split(new RegExp(`(${escapedQuery})`, "ig"));
+
+  if (parts.length <= 1) {
+    return text;
+  }
+
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.toLowerCase() === normalizedQuery ? (
+          <mark key={`${part}-${index}`} className="rounded bg-[#fff2a8] px-1 text-[#1c1f26]">
+            {part}
+          </mark>
+        ) : (
+          <span key={`${part}-${index}`}>{part}</span>
+        ),
+      )}
+    </>
   );
 }

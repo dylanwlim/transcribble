@@ -3,7 +3,7 @@
 import { env, pipeline } from "@huggingface/transformers";
 
 import { MODEL_ID, type Runtime } from "@/lib/transcribble/constants";
-import type { TranscriptChunk } from "@/lib/transcribble/transcript";
+import type { TranscriptChunk } from "@/lib/transcribble/types";
 
 declare const self: DedicatedWorkerGlobalScope;
 

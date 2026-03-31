@@ -1,26 +1,167 @@
-# transcribble
+# Transcribble
 
-`transcribble` is a one-page media-to-text transcription app that runs locally in the browser. It accepts `.mp3`, `.mp4`, `.m4a`, `.wav`, and `.mov`, extracts audio client-side when needed, and transcribes on-device with Whisper via `@huggingface/transformers`.
+Transcribble is a local-first audio workspace built around on-device transcription. Instead of stopping at `upload -> transcript -> txt`, it turns recordings into persistent local projects with a media timeline, editable timestamped segments, grounded extracted outputs, and reusable cross-project search.
 
-## Highlights
+## What Changed
 
-- Local-first transcription with no paid inference API
-- WebGPU acceleration when available, WebAssembly fallback otherwise
-- Drag-and-drop upload flow with validation, progress, and friendly errors
-- In-browser audio extraction for video uploads using `ffmpeg.wasm`
-- Copy, download-as-`.txt`, and reset actions after transcription completes
-- Responsive dashboard UI adapted from the provided template
+This repo now behaves more like an audio IDE than a single-use transcription wrapper:
 
-## Stack
+- Persistent local project library backed by IndexedDB
+- Queue-based local transcription for multiple audio/video files
+- Timestamp-aware transcript timeline with click-to-seek
+- Local media persistence so projects can be reopened later
+- Editable transcript segments with autosave
+- Bookmarks, highlights, chapters, and key moments
+- Local search within a transcript and across the saved library
+- Grounded local extraction for summaries, action items, questions, dates, entities, glossary terms, and review cues
+- Multi-format export: `txt`, `md`, `srt`, `vtt`
+- Session-map timeline with chapters, pause-derived turns, marks, and search hit visibility
+- Tabbed inspector for selection, outline, insights, and session setup
+- Safer delete handling and stronger atomic project/file persistence
+- Local setup/priming flow for the transcription model and media runtime
+- Keyboard shortcuts for transcript and library workflows
+
+## Product Direction
+
+The core product is now:
+
+- local-first
+- privacy-preserving
+- zero-marginal-cost in the core flow
+- inspectable rather than fake “AI”
+- grounded in transcript spans and timestamps
+
+The transcript is treated as source material for a broader workspace:
+
+- timeline navigation
+- reusable project memory
+- deterministic extraction
+- exportable artifacts
+- review and editing workflow
+
+## Architecture
+
+### Frontend
 
 - Next.js 15
 - React 19
 - TypeScript
 - Tailwind CSS
-- `@huggingface/transformers`
-- `@ffmpeg/ffmpeg`
 
-## Local development
+### Local processing
+
+- `@huggingface/transformers` for Whisper inference in a web worker
+- `@ffmpeg/ffmpeg` for local audio extraction from video or browser decode fallback
+
+### Local persistence
+
+- IndexedDB stores project metadata, source media files, and reusable workspace state
+
+### Deterministic intelligence layer
+
+The “intelligence” features are intentionally non-hosted and inspectable:
+
+- transcript segmentation from timestamped chunks
+- explicit pause-derived turn map for navigation and future speaker attribution
+- chapter generation from structure and repeated terms
+- extractive summaries
+- action-item detection
+- question extraction
+- explicit date/deadline spotting
+- entity and glossary extraction
+- key-moment scoring
+- transcript review cues
+- local full-text search index
+
+No paid inference API or mandatory cloud backend was introduced.
+
+## Fully Local vs Optional
+
+### Fully local today
+
+These features do not require a paid API or hosted backend:
+
+- transcription runtime orchestration
+- media decoding and extraction
+- queued processing
+- project persistence
+- transcript editing
+- bookmarks and highlights
+- pause-derived turn navigation
+- chapters and key moments
+- local search
+- summary/action/question/date/entity/glossary extraction
+- exports
+
+### Optional enrichments
+
+No live third-party enrichment provider is required or enabled in this build.
+
+The current implementation deliberately prioritizes local utility over bolt-on public APIs. If public/open-data enrichments are added later, they should remain:
+
+- optional
+- cache-first
+- adapter-based
+- rate-limited
+- failure-tolerant
+- non-blocking for the core workflow
+
+## Important Offline Note
+
+Core processing is local, but the first run still needs model/runtime assets to be downloaded and cached by the browser:
+
+- Whisper model assets are fetched on first use and then cached locally by the browser/runtime
+- `ffmpeg.wasm` runtime assets are fetched on first use and then cached
+- The app now exposes a setup/priming flow so users can warm those assets before they need an offline session
+
+After those assets are cached, normal use stays local. Cold-start offline use from a brand-new browser profile is not yet fully bundled in-repo.
+
+If strict first-run offline support is required, the next step would be shipping the model/runtime assets locally instead of relying on first-use downloads.
+
+## Workspace UX
+
+### Library
+
+- local project persistence
+- queue visibility
+- safer retry/delete controls
+- cross-project search
+- title-only search hits for queued or not-yet-transcribed projects
+
+### Timeline
+
+- session-map overview strip with chapter bands, turn boundaries, marks, search hit markers, and the live playhead
+- timestamped transcript segments
+- active playback highlighting
+- click-to-seek
+- inline match highlighting
+
+### Editing
+
+- autosaved segment editing
+- title editing
+- bookmarks and color highlights
+- saved-mark labels stay aligned with edited transcript text
+
+### Outputs
+
+- grounded summary bullets
+- linked action items
+- linked open questions
+- linked date references
+- linked saved moments and key moments in markdown export
+- extracted entities and glossary terms
+- review cues for ambiguous segments
+
+## Keyboard Shortcuts
+
+- `/` focus transcript search
+- `Ctrl/Cmd + K` focus library search
+- `Space` play or pause media
+- `B` toggle bookmark on the selected segment
+- `J` / `K` move to next or previous segment
+
+## Development
 
 ```bash
 npm install
@@ -29,20 +170,39 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-## Production build
+## Verification
 
 ```bash
 npm run lint
+npm test
 npm run build
-npm run start
 ```
 
-## Deployment
+## File Layout
 
-The app is frontend-only and deploys cleanly to Vercel with no environment variables.
+- [app/page.tsx](/Users/dylan/Projects/Dev/transcribble/app/page.tsx): app entry
+- [components/transcribble-app.tsx](/Users/dylan/Projects/Dev/transcribble/components/transcribble-app.tsx): multi-pane audio workspace UI
+- [hooks/use-transcribble.ts](/Users/dylan/Projects/Dev/transcribble/hooks/use-transcribble.ts): workspace controller, queue, playback, autosave
+- [workers/transcriber.worker.ts](/Users/dylan/Projects/Dev/transcribble/workers/transcriber.worker.ts): local Whisper worker
+- [lib/transcribble/workspace-db.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/workspace-db.ts): IndexedDB project/media storage
+- [lib/transcribble/analysis.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/analysis.ts): deterministic transcript intelligence layer
+- [lib/transcribble/export.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/export.ts): `txt`/`md`/`srt`/`vtt` exports
+- [lib/transcribble/search.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/search.ts): transcript and library search
 
-## Notes on local transcription
+## Current Limitations
 
-- The first transcription run downloads model files and caches them in the browser.
-- Performance depends on browser support and hardware. Recent Chrome and Edge builds provide the best WebGPU path today.
-- Large or long media files can still hit browser memory limits because decoding, extraction, and inference all happen locally.
+- True speaker diarization is not implemented. The workspace now exposes explicit pause-derived turns, but it does not claim speaker identity or confidence.
+- Confidence scores from the model are not exposed directly; the UI shows deterministic review cues instead.
+- First-run asset download is still required before the app can operate fully offline from cache, even though the setup panel can now prime those caches proactively.
+- Very large files can still hit browser memory limits depending on hardware and browser runtime support.
+
+## Best Next Steps
+
+Highest-leverage follow-ons after this pass:
+
+1. Add true speaker diarization using a practical local-only pipeline.
+2. Add manual speaker assignment on top of the new turn model, then layer in true local diarization when the runtime footprint is justified.
+3. Bundle model/runtime assets or ship an installable desktop shell for stricter offline guarantees.
+4. Add waveform rendering and range-based highlights on top of the new session map.
+5. Add optional cache-first public reference enrichments behind explicit feature flags.
+6. Add a semantic local index if the model/runtime footprint can be justified.

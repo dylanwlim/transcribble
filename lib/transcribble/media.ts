@@ -321,6 +321,14 @@ export async function prepareAudioForTranscription(
   }
 }
 
+export async function warmMediaRuntime(callbacks: PreparationCallbacks = {}) {
+  callbacks.onStatus?.("Preparing the local media runtime...");
+  callbacks.onProgress?.(0);
+  await getFFmpeg(callbacks.onProgress);
+  callbacks.onStatus?.("Local media runtime cached in this browser.");
+  callbacks.onProgress?.(100);
+}
+
 export function describeFile(file: File | null) {
   if (!file) {
     return "No media selected";

@@ -1,4 +1,4 @@
-export const APP_NAME = "transcribble";
+export const APP_NAME = "Transcribble";
 
 export const AUDIO_SAMPLE_RATE = 16_000;
 export const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024;
@@ -27,4 +27,4 @@ export const MODEL_LABELS: Record<Runtime, string> = {
 };
 
 export const LOCAL_PROCESSING_NOTE =
-  "Runs on-device. First use downloads local model files and caches them for later.";
+  "Runs on-device. First use downloads local model files and caches them for later use.";

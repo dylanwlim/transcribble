@@ -1,21 +1,22 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { IBM_Plex_Mono, Manrope } from "next/font/google";
 
 import "./globals.css";
 
-const geistSans = Geist({
+const manrope = Manrope({
   subsets: ["latin"],
-  variable: "--font-geist-sans",
+  variable: "--font-manrope",
 });
 
-const geistMono = Geist_Mono({
+const plexMono = IBM_Plex_Mono({
+  weight: ["400", "500"],
   subsets: ["latin"],
-  variable: "--font-geist-mono",
+  variable: "--font-plex-mono",
 });
 
 export const metadata: Metadata = {
-  title: "transcribble",
-  description: "Private media-to-text transcription that runs directly in your browser.",
+  title: "Transcribble",
+  description: "Local-first audio workspace with on-device transcription, timeline editing, grounded insights, and reusable transcript memory.",
   icons: {
     icon: "/icon.svg",
   },
@@ -29,7 +30,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}>
+      <body className={`${manrope.variable} ${plexMono.variable} font-sans antialiased`}>
         {children}
       </body>
     </html>
