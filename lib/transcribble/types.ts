@@ -5,6 +5,7 @@ export type ProjectStatus =
   | "preparing"
   | "loading-model"
   | "transcribing"
+  | "paused"
   | "ready"
   | "error";
 

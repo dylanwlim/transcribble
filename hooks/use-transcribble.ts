@@ -207,13 +207,12 @@ export function useTranscribble() {
   const [transcriptQuery, setTranscriptQuery] = useState("");
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
   const [workspaceReady, setWorkspaceReady] = useState(false);
-  const [assetSetup, setAssetSetup] = useState<AssetSetupState>(() => ({
+  const [assetSetup, setAssetSetup] = useState<AssetSetupState>({
     ...DEFAULT_ASSET_STATE,
-    ...(readStoredJson<PersistedAssetState>(ASSET_STATE_KEY) ?? DEFAULT_ASSET_STATE),
     warmingModel: false,
     warmingMedia: false,
-    online: typeof navigator === "undefined" ? true : navigator.onLine,
-  }));
+    online: true,
+  });
 
   projectsRef.current = projects;
   selectedProjectIdRef.current = selectedProjectId;
@@ -318,6 +317,7 @@ export function useTranscribble() {
         project.status === "loading-model" ||
         project.status === "transcribing",
       ),
+      paused: projects.filter((project) => project.status === "paused"),
       errored: projects.filter((project) => project.status === "error"),
     }),
     [projects],
@@ -770,10 +770,12 @@ export function useTranscribble() {
 
   useEffect(() => {
     let cancelled = false;
+    const storedAssetState = readStoredJson<PersistedAssetState>(ASSET_STATE_KEY) ?? DEFAULT_ASSET_STATE;
 
     setCapabilityIssue(getLocalInferenceCapabilityIssue());
     setAssetSetup((previous) => ({
       ...previous,
+      ...storedAssetState,
       online: typeof navigator === "undefined" ? true : navigator.onLine,
     }));
 
@@ -1337,6 +1339,40 @@ export function useTranscribble() {
     [applyProjectUpdate],
   );
 
+  const cancelProject = useCallback(
+    (projectId: string) => {
+      const project = projectsRef.current.find((item) => item.id === projectId);
+      if (!project) {
+        return;
+      }
+
+      const wasActiveJob = abortActiveJob(projectId);
+
+      applyProjectUpdate(
+        projectId,
+        (current) => ({
+          ...current,
+          status: "paused",
+          progress: 0,
+          stageLabel: wasActiveJob ? "Stopped" : "Removed from queue",
+          detail: wasActiveJob
+            ? "Local processing stopped before the transcript was ready. Retry to start again."
+            : "Held out of the queue. Retry to place it back in line.",
+          error: undefined,
+        }),
+        { persist: true },
+      );
+
+      setNotice({
+        tone: "info",
+        message: wasActiveJob
+          ? `"${project.title}" was stopped before transcription finished.`
+          : `"${project.title}" was removed from the queue.`,
+      });
+    },
+    [abortActiveJob, applyProjectUpdate],
+  );
+
   const removeProject = useCallback(
     async (projectId: string) => {
       const project = projectsRef.current.find((item) => item.id === projectId);
@@ -1579,6 +1615,7 @@ export function useTranscribble() {
     toggleHighlight: (color: HighlightColor) => upsertMark("highlight", color),
     primeTranscriptionModel,
     primeMediaRuntime,
+    cancelProject,
     retryProject,
     removeProject,
     openLibrarySearchResult,

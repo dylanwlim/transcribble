@@ -39,7 +39,7 @@ export function createProjectFromFile(file: File, runtime: Runtime): TranscriptP
 
 export function recoverPersistedProjects(projects: TranscriptProject[]) {
   return projects.map((project) => {
-    if (project.status === "ready" || project.status === "error") {
+    if (project.status === "ready" || project.status === "error" || project.status === "paused") {
       return project;
     }
 
