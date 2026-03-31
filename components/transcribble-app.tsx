@@ -33,7 +33,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { useTranscribble } from "@/hooks/use-transcribble";
-import { APP_NAME, LOCAL_PROCESSING_NOTE } from "@/lib/transcribble/constants";
+import { APP_NAME, MAX_FILE_SIZE_LABEL } from "@/lib/transcribble/constants";
 import type { ExportFormat } from "@/lib/transcribble/export";
 import { formatDuration } from "@/lib/transcribble/transcript";
 import type {
@@ -160,6 +160,58 @@ export function TranscribbleApp() {
 
   const emptyState = !selectedProject && projects.length === 0;
   const setupReady = assetSetup.modelReady && assetSetup.mediaReady;
+  const effectiveOnline = workspaceReady ? assetSetup.online : true;
+  const queuedCount = queuedProjects.length;
+  const workingProjectCount = useMemo(
+    () =>
+      projectGroups.active.filter(
+        (item) => item.status === "preparing" || item.status === "loading-model" || item.status === "transcribing",
+      ).length,
+    [projectGroups.active],
+  );
+  const supportedFormatsLabel = useMemo(
+    () =>
+      accept
+        .split(",")
+        .map((value) => value.replace(".", "").toUpperCase())
+        .join(" · "),
+    [accept],
+  );
+  const setupSummary = setupReady
+    ? "Offline-ready cache primed for this browser."
+    : effectiveOnline
+      ? "First run caches the local model and media runtime for later offline sessions."
+      : "Reconnect once to cache local assets for dependable offline use.";
+  const runtimeLabel = runtime === "webgpu" ? "WebGPU runtime" : "WASM runtime";
+  const setupBreakdownLabel = `${assetSetup.modelReady ? "Model cached" : "Model pending"} • ${
+    assetSetup.mediaReady ? "Media runtime cached" : "Media runtime pending"
+  }`;
+  const insightItemCount = useMemo(() => {
+    if (!selectedProjectInsights) {
+      return 0;
+    }
+
+    return [
+      selectedProjectInsights.summary?.length ?? 0,
+      selectedProjectInsights.actions?.length ?? 0,
+      selectedProjectInsights.questions?.length ?? 0,
+      selectedProjectInsights.dates?.length ?? 0,
+      selectedProjectInsights.keyMoments?.length ?? 0,
+      selectedProjectInsights.entities?.length ?? 0,
+      selectedProjectInsights.glossary?.length ?? 0,
+      selectedProjectInsights.reviewCues?.length ?? 0,
+    ].reduce((total, count) => total + count, 0);
+  }, [selectedProjectInsights]);
+
+  const primeWorkspaceSetup = async () => {
+    if (!assetSetup.modelReady) {
+      await primeTranscriptionModel();
+    }
+
+    if (!assetSetup.mediaReady) {
+      await primeMediaRuntime();
+    }
+  };
 
   useEffect(() => {
     if (!selectedProject) {
@@ -186,9 +238,9 @@ export function TranscribbleApp() {
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
       >
-        <header className="sticky top-0 z-20 border-b border-black/10 bg-[#13151a] text-white">
+        <header className="sticky top-0 z-20 border-b border-black/10 bg-[#13151a]/95 text-white backdrop-blur">
           <div className="mx-auto max-w-[1800px] px-4 py-3 sm:px-6 lg:px-8">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
               <div className="flex min-w-0 items-start gap-3 sm:items-center sm:gap-4">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#1f4fff] shadow-[0_12px_30px_rgba(31,79,255,0.35)]">
                   <AudioLines className="h-5 w-5" />
@@ -198,41 +250,36 @@ export function TranscribbleApp() {
                     <span className="text-lg font-semibold tracking-tight">{APP_NAME}</span>
                     <Badge className="border border-white/15 bg-white/10 text-white">Local-first audio workspace</Badge>
                   </div>
-                  <div className="mt-1 max-w-2xl text-sm leading-6 text-white/65">
-                    Transcript, timeline, memory, and evidence-linked outputs. No paid API in the core flow.
+                  <div className="mt-1 max-w-xl text-sm leading-5 text-white/62">
+                    Searchable transcripts, timestamped editing, and grounded outputs that stay on-device.
                   </div>
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-                <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
-                  <ShieldCheck className="h-4 w-4 text-[#86efac]" />
-                  <span className="sm:hidden">Runs on-device</span>
-                  <span className="hidden sm:inline">{LOCAL_PROCESSING_NOTE}</span>
-                </div>
-                <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm sm:flex">
-                  <Cpu className="h-4 w-4 text-[#a5b4fc]" />
-                  <span>{runtime === "webgpu" ? "WebGPU local runtime" : "WASM local runtime"}</span>
-                </div>
-                <div
-                  className={`rounded-full border px-3 py-2 text-sm ${
-                    setupReady
-                      ? "border-[#2f5f38] bg-[#173321] text-[#bdf7c5]"
-                      : "border-white/10 bg-white/5 text-white/75"
-                  }`}
-                >
-                  {setupReady ? "Offline primed" : "Cold-start setup pending"}
-                </div>
-                {queuedProjects.length > 0 ? (
-                  <div className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
-                    Queue {queuedProjects.length}
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center xl:justify-end">
+                <div className="flex min-w-0 items-start gap-3 rounded-[24px] border border-white/10 bg-white/5 px-3.5 py-2.5 sm:items-center">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl bg-white/8 text-[#86efac]">
+                    <ShieldCheck className="h-4 w-4" />
                   </div>
-                ) : null}
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-white">On-device workspace</div>
+                    <div className="text-sm leading-5 text-white/62">{setupSummary}</div>
+                  </div>
+                </div>
+
+                <HeaderPill
+                  icon={Cpu}
+                  label={runtimeLabel}
+                  tone="default"
+                />
+                <HeaderPill
+                  icon={effectiveOnline ? CheckCircle2 : AlertTriangle}
+                  label={setupReady ? "Offline ready" : effectiveOnline ? "Offline setup" : "Needs connection"}
+                  tone={setupReady ? "success" : effectiveOnline ? "default" : "warning"}
+                />
+                {queuedCount > 0 ? <HeaderPill label={`Queue ${queuedCount}`} tone="default" /> : null}
                 {!emptyState ? (
-                  <Button
-                    onClick={openFilePicker}
-                    className="bg-[#1f4fff] text-white hover:bg-[#1a43d6]"
-                  >
+                  <Button onClick={openFilePicker} className="bg-[#1f4fff] text-white hover:bg-[#1a43d6]">
                     <FolderOpen className="mr-2 h-4 w-4" />
                     Add media
                   </Button>
@@ -291,7 +338,7 @@ export function TranscribbleApp() {
                   )}
                 </section>
               ) : (
-                <div className="space-y-6">
+                <div className="space-y-5">
                   <section className="space-y-3 px-2">
                     <SectionHeading icon={Waves} title="Active queue" />
                     {projectGroups.active.length > 0 ? (
@@ -307,8 +354,8 @@ export function TranscribbleApp() {
                       ))
                     ) : (
                       <EmptyPanel
-                        title="Nothing in flight"
-                        body="Drop multiple files and the workspace will process them locally in order."
+                        title="Queue is clear"
+                        body="Drop files anywhere or add them from the workspace to process them locally in order."
                         compact
                       />
                     )}
@@ -329,8 +376,8 @@ export function TranscribbleApp() {
                       ))
                     ) : (
                       <EmptyPanel
-                        title="Your local library starts here"
-                        body="Completed sessions stay saved locally for search, export, and later review."
+                        title="Saved sessions appear here"
+                        body="Completed transcripts stay searchable, editable, and exportable in this browser."
                         compact
                       />
                     )}
@@ -360,30 +407,96 @@ export function TranscribbleApp() {
             <WorkspaceSurface className="overflow-hidden">
               {workspaceReady ? (
                 emptyState ? (
-                  <div className="flex min-h-[clamp(28rem,58vh,36rem)] flex-col items-center justify-center px-6 py-12 text-center sm:px-8 sm:py-14 lg:px-12">
-                    <div className="flex h-14 w-14 items-center justify-center rounded-[24px] bg-[#1f4fff] text-white shadow-[0_16px_40px_rgba(31,79,255,0.28)]">
-                      <AudioLines className="h-7 w-7" />
-                    </div>
-                    <div className="mt-6 text-xs font-semibold uppercase tracking-[0.26em] text-[#6f6a60]">
-                      Privacy-first workspace
-                    </div>
-                    <h1 className="mt-3 max-w-[13.5ch] text-[clamp(2.6rem,4.4vw,4.6rem)] font-semibold leading-[0.95] tracking-[-0.05em] text-[#101218]">
-                      Turn raw audio into a searchable local workspace.
-                    </h1>
-                    <p className="mt-4 max-w-xl text-pretty text-base leading-7 text-[#5c5a52]">
-                      Queue recordings, revisit prior sessions, edit timestamped segments, save moments, export usable
-                      artifacts, and keep the entire core workflow on-device.
-                    </p>
-                    <div className="mt-8 flex flex-wrap justify-center gap-3">
-                      <Button
-                        onClick={openFilePicker}
-                        className="bg-[#1f4fff] text-white hover:bg-[#1a43d6]"
-                      >
-                        <FolderOpen className="mr-2 h-4 w-4" />
-                        Add local media
-                      </Button>
-                      <div className="rounded-full border border-black/10 bg-white/80 px-4 py-2 text-sm font-medium text-[#363943]">
-                        Queue multiple files, keep everything local
+                  <div className="min-h-[clamp(24rem,50vh,31rem)] px-6 py-8 sm:px-8 sm:py-9 lg:px-10">
+                    <div className="max-w-4xl">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-[22px] bg-[#1f4fff] text-white shadow-[0_16px_40px_rgba(31,79,255,0.24)]">
+                          <AudioLines className="h-6 w-6" />
+                        </div>
+                        <Badge className="border border-black/10 bg-white text-[#242831]">First local session</Badge>
+                        <Badge
+                          className={`border ${
+                            setupReady
+                              ? "border-[#b2dbbd] bg-[#ecfff1] text-[#17643b]"
+                              : "border-[#d6d0c3] bg-[#f6f1e7] text-[#5c5a52]"
+                          }`}
+                        >
+                          {setupReady ? "Offline cache primed" : "First-run setup available"}
+                        </Badge>
+                      </div>
+
+                      <div className="mt-6 text-xs font-semibold uppercase tracking-[0.26em] text-[#6f6a60]">
+                        Privacy-first workspace
+                      </div>
+                      <h1 className="mt-3 max-w-[11.5ch] text-[clamp(2.35rem,4vw,4.15rem)] font-semibold leading-[0.96] tracking-[-0.05em] text-[#101218]">
+                        Turn raw audio into a searchable local workspace.
+                      </h1>
+                      <p className="mt-4 max-w-2xl text-pretty text-[15px] leading-7 text-[#5c5a52] sm:text-base">
+                        Add audio or video, let the browser transcribe it locally, then search, edit, and export the
+                        same timestamped session without a paid backend in the core flow.
+                      </p>
+
+                      <div className="mt-6 flex flex-wrap gap-3">
+                        <Button onClick={openFilePicker} className="bg-[#1f4fff] text-white hover:bg-[#1a43d6]">
+                          <FolderOpen className="mr-2 h-4 w-4" />
+                          Add local media
+                        </Button>
+                        {!setupReady ? (
+                          <Button
+                            variant="outline"
+                            className="border-black/10 bg-white"
+                            onClick={() => {
+                              void primeWorkspaceSetup();
+                            }}
+                            disabled={
+                              assetSetup.warmingModel ||
+                              assetSetup.warmingMedia ||
+                              queuedCount > 0 ||
+                              !effectiveOnline
+                            }
+                          >
+                            <ShieldCheck className="mr-2 h-4 w-4" />
+                            {assetSetup.warmingModel || assetSetup.warmingMedia ? "Priming setup…" : "Prime offline setup"}
+                          </Button>
+                        ) : (
+                          <div className="inline-flex items-center rounded-full border border-[#b2dbbd] bg-[#ecfff1] px-4 py-2 text-sm font-medium text-[#17643b]">
+                            Offline cache primed for this browser
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-5 rounded-[24px] border border-dashed border-[#d8d0c2] bg-[#f8f3e9] px-4 py-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <div className="font-medium text-[#171a20]">Drop audio or video anywhere in the workspace</div>
+                            <div className="mt-1 text-sm text-[#5c5a52]">
+                              {supportedFormatsLabel} up to {MAX_FILE_SIZE_LABEL} each. Multiple files queue
+                              automatically and stay local.
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#6d6a61]">
+                            <span className="rounded-full border border-black/10 bg-white px-3 py-1.5">Multi-file queue</span>
+                            <span className="rounded-full border border-black/10 bg-white px-3 py-1.5">Local-only core flow</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-5 grid gap-3 md:grid-cols-3">
+                        <FeatureCue
+                          icon={Search}
+                          title="Search locally"
+                          body="Titles and transcript spans stay indexed in this browser for later lookup."
+                        />
+                        <FeatureCue
+                          icon={Bookmark}
+                          title="Keep evidence attached"
+                          body="Edits, bookmarks, highlights, and review cues stay tied to transcript timestamps."
+                        />
+                        <FeatureCue
+                          icon={Download}
+                          title="Export working files"
+                          body="TXT, MD, SRT, and VTT come from the same local session without handoff."
+                        />
                       </div>
                     </div>
                   </div>
@@ -1000,23 +1113,102 @@ export function TranscribbleApp() {
 
           <aside className="order-3 self-start space-y-4 lg:order-none lg:space-y-5">
             <WorkspaceSurface className="p-5">
-              <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">Workspace notes</div>
-              <div className="mt-4 divide-y divide-black/10 text-sm text-[#5c5a52]">
-                <InfoBox
-                  icon={ShieldCheck}
-                  title="Local persistence"
-                  body="Projects, source media, edits, and bookmarks are stored in the browser so you can close and reopen the workspace."
-                />
-                <InfoBox
-                  icon={Cpu}
-                  title="Cost profile"
-                  body="There is no paid API, no usage-based backend, and no per-minute transcription bill in the core workflow."
-                />
-                <InfoBox
-                  icon={Sparkles}
-                  title="Grounded outputs"
-                  body="Summaries, action items, questions, dates, glossary terms, and key moments all point back to transcript segments."
-                />
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">
+                    {emptyState ? "Start here" : "Workspace cues"}
+                  </div>
+                  <div className="mt-1 text-lg font-semibold tracking-tight">
+                    {emptyState ? "First-run guidance" : "Operate the local workspace"}
+                  </div>
+                </div>
+                <Badge className="border border-black/10 bg-white text-[#2b2d35]">
+                  {emptyState ? (effectiveOnline ? "Online" : "Offline") : runtimeLabel}
+                </Badge>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                {emptyState ? (
+                  <>
+                    <ActionNote
+                      icon={ShieldCheck}
+                      title="Prime the browser for offline reuse"
+                      body={
+                        setupReady
+                          ? "The local model and media runtime are cached for later offline sessions in this browser."
+                          : effectiveOnline
+                            ? "Cache the local model and media runtime once so later sessions can reopen more reliably offline."
+                            : "Reconnect once to cache the local model and media runtime for offline reuse."
+                      }
+                      meta={setupBreakdownLabel}
+                      action={
+                        !setupReady ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-black/10 bg-white"
+                            onClick={() => {
+                              void primeWorkspaceSetup();
+                            }}
+                            disabled={
+                              assetSetup.warmingModel ||
+                              assetSetup.warmingMedia ||
+                              queuedCount > 0 ||
+                              !effectiveOnline
+                            }
+                          >
+                            {assetSetup.warmingModel || assetSetup.warmingMedia ? "Priming…" : "Prime setup"}
+                          </Button>
+                        ) : null
+                      }
+                    />
+                    <ActionNote
+                      icon={Search}
+                      title="Saved sessions stay searchable"
+                      body="Completed projects keep titles and transcript spans indexed locally for later lookup and reopening."
+                      meta="Cmd/Ctrl K"
+                    />
+                    <ActionNote
+                      icon={Sparkles}
+                      title="Outputs stay grounded"
+                      body="Summaries, action items, dates, glossary terms, and key moments can point back to transcript segments."
+                      meta="Evidence-linked"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <ActionNote
+                      icon={Search}
+                      title="Search the library or the current transcript"
+                      body={
+                        hasTranscript
+                          ? `${transcriptSegments.length} timestamped segments are ready to scan inside this session.`
+                          : "Transcript search unlocks as soon as the local transcript is ready."
+                      }
+                      meta={hasTranscript ? "/ in transcript" : "Cmd/Ctrl K library"}
+                    />
+                    <ActionNote
+                      icon={Sparkles}
+                      title="Trace outputs back to source"
+                      body={
+                        selectedProjectInsights
+                          ? `${insightItemCount} extracted items can jump back to their source segment or timestamp.`
+                          : "Summary, action, question, date, glossary, and review lists stay tied to transcript spans."
+                      }
+                      meta="Inspector insights"
+                    />
+                    <ActionNote
+                      icon={Download}
+                      title="Export or reuse the current session"
+                      body={
+                        hasTranscript
+                          ? "Copy the transcript or export text and caption files directly from the active workspace."
+                          : "Exports become available once the transcript is finished."
+                      }
+                      meta="TXT · MD · SRT · VTT"
+                    />
+                  </>
+                )}
               </div>
             </WorkspaceSurface>
 
@@ -1029,12 +1221,35 @@ export function TranscribbleApp() {
                 <Badge className="border border-black/10 bg-white text-[#2b2d35]">{projects.length} projects</Badge>
               </div>
 
-              <div className="mt-4 space-y-3">
-                <MiniStat label="Queued" value={String(projectGroups.active.filter((item) => item.status === "queued").length)} />
-                <MiniStat label="Transcribing" value={String(projectGroups.active.filter((item) => item.status === "transcribing" || item.status === "preparing" || item.status === "loading-model").length)} />
+              <div className="mt-3 text-sm leading-6 text-[#5c5a52]">
+                {emptyState
+                  ? "Nothing is queued yet. Add local media to start building a searchable browser-based library."
+                  : selectedProject
+                    ? `${selectedProject.stageLabel}. ${
+                        selectedProject.status === "ready"
+                          ? "Search, edit, and export are available."
+                          : selectedProject.detail
+                      }`
+                    : "Select a saved project to reopen the workspace."}
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <MiniStat label="Queued" value={String(queuedCount)} />
+                <MiniStat label="Working" value={String(workingProjectCount)} />
                 <MiniStat label="Ready" value={String(projectGroups.ready.length)} />
                 <MiniStat label="Errored" value={String(projectGroups.errored.length)} />
               </div>
+
+              {selectedProject ? (
+                <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#6d6a61]">
+                  <span className="rounded-full border border-black/10 bg-white px-3 py-1.5">
+                    {currentProjectMarks.length} saved marks
+                  </span>
+                  <span className="rounded-full border border-black/10 bg-white px-3 py-1.5">
+                    {hasTranscript ? `${transcriptSegments.length} segments` : "Transcript pending"}
+                  </span>
+                </div>
+              ) : null}
             </WorkspaceSurface>
           </aside>
         </div>
@@ -1050,16 +1265,21 @@ export function TranscribbleApp() {
 
         {dragActive ? (
           <div className="pointer-events-none fixed inset-0 z-30 flex items-center justify-center bg-[#10131f]/55 p-6 backdrop-blur-sm">
-            <div className="w-full max-w-xl rounded-[32px] border border-white/20 bg-white/10 px-8 py-12 text-center text-white shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+            <div className="w-full max-w-xl rounded-[32px] border border-white/20 bg-white/10 px-8 py-10 text-center text-white shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
               <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-white/15">
                 <FolderOpen className="h-7 w-7" />
               </div>
               <div className="mt-5 text-sm font-semibold uppercase tracking-[0.28em] text-white/70">
                 Drop local media
               </div>
-              <div className="mt-3 text-3xl font-semibold tracking-tight">Queue audio or video files into the workspace</div>
-              <div className="mt-3 text-sm text-white/75">
-                Files stay local. Saved sessions become searchable immediately after transcription.
+              <div className="mt-3 text-3xl font-semibold tracking-tight">Queue audio or video into the workspace</div>
+              <div className="mt-3 text-sm leading-6 text-white/75">
+                {supportedFormatsLabel} up to {MAX_FILE_SIZE_LABEL} each. Files stay local and saved sessions become
+                searchable after transcription.
+              </div>
+              <div className="mt-4 flex flex-wrap justify-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-white/70">
+                <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5">Multi-file queue</span>
+                <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5">On-device core flow</span>
               </div>
             </div>
           </div>
@@ -1082,6 +1302,84 @@ function WorkspaceSurface({
     >
       {children}
     </section>
+  );
+}
+
+function HeaderPill({
+  icon: Icon,
+  label,
+  tone = "default",
+}: {
+  icon?: typeof Search;
+  label: string;
+  tone?: "default" | "success" | "warning";
+}) {
+  const toneClass =
+    tone === "success"
+      ? "border-[#2f5f38] bg-[#173321] text-[#bdf7c5]"
+      : tone === "warning"
+        ? "border-[#6b4a1c] bg-[#332515] text-[#f6d49a]"
+        : "border-white/10 bg-white/5 text-white/75";
+
+  return (
+    <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm ${toneClass}`}>
+      {Icon ? <Icon className="h-4 w-4" /> : null}
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function FeatureCue({
+  icon: Icon,
+  title,
+  body,
+}: {
+  icon: typeof Search;
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="h-full rounded-[22px] border border-black/10 bg-[#fcfbf7] px-4 py-4">
+      <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#eef2ff] text-[#1f4fff]">
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="mt-3 font-medium text-[#171a20]">{title}</div>
+      <div className="mt-1 text-sm leading-6 text-[#5c5a52]">{body}</div>
+    </div>
+  );
+}
+
+function ActionNote({
+  icon: Icon,
+  title,
+  body,
+  meta,
+  action,
+}: {
+  icon: typeof Search;
+  title: string;
+  body: string;
+  meta?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-[22px] border border-black/10 bg-[#fcfbf7] px-4 py-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-[#eef2ff] text-[#1f4fff]">
+            <Icon className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <div className="font-medium text-[#171a20]">{title}</div>
+            <div className="mt-1 text-sm leading-6 text-[#5c5a52]">{body}</div>
+            {meta ? (
+              <div className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#6d6a61]">{meta}</div>
+            ) : null}
+          </div>
+        </div>
+        {action ? <div className="shrink-0">{action}</div> : null}
+      </div>
+    </div>
   );
 }
 
@@ -1873,44 +2171,20 @@ function EmptyPanel({
   return (
     <div
       className={`rounded-[22px] border border-dashed border-black/10 bg-[#f8f4eb] text-sm text-[#5c5a52] ${
-        compact ? "px-4 py-4" : "px-4 py-5"
+        compact ? "px-3.5 py-3.5" : "px-4 py-5"
       }`}
     >
       <div className={`flex gap-3 ${compact ? "items-start" : "items-center"}`}>
         <div
           className={`flex items-center justify-center rounded-2xl border border-black/10 bg-white ${
-            compact ? "h-9 w-9" : "h-10 w-10"
+            compact ? "h-8 w-8" : "h-10 w-10"
           }`}
         >
           <Icon className="h-4 w-4 text-[#2b2d35]" />
         </div>
         <div>
           <div className="font-medium text-[#171a20]">{title}</div>
-          <div className="mt-1 text-pretty">{body}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function InfoBox({
-  icon: Icon,
-  title,
-  body,
-}: {
-  icon: typeof ShieldCheck;
-  title: string;
-  body: string;
-}) {
-  return (
-    <div className="py-3 first:pt-0 last:pb-0">
-      <div className="flex items-start gap-3">
-        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl bg-[#eef2ff] text-[#1f4fff]">
-          <Icon className="h-4 w-4" />
-        </div>
-        <div>
-          <div className="font-medium text-[#171a20]">{title}</div>
-          <div className="mt-1 text-sm text-[#5c5a52]">{body}</div>
+          <div className={`mt-1 text-pretty ${compact ? "leading-6" : ""}`}>{body}</div>
         </div>
       </div>
     </div>
@@ -1959,9 +2233,9 @@ function MiniStat({
   value: string;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-2xl border border-black/10 bg-white px-4 py-2.5 text-sm">
-      <span className="text-[#5c5a52]">{label}</span>
-      <span className="font-medium text-[#171a20]">{value}</span>
+    <div className="rounded-2xl border border-black/10 bg-white px-4 py-3">
+      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6d6a61]">{label}</div>
+      <div className="mt-2 text-2xl font-semibold tracking-tight text-[#171a20]">{value}</div>
     </div>
   );
 }
