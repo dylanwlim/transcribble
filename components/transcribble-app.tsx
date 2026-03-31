@@ -159,6 +159,7 @@ export function TranscribbleApp() {
   }, [selectedProject]);
 
   const emptyState = !selectedProject && projects.length === 0;
+  const setupReady = assetSetup.modelReady && assetSetup.mediaReady;
 
   useEffect(() => {
     if (!selectedProject) {
@@ -186,56 +187,63 @@ export function TranscribbleApp() {
         onDragLeave={onDragLeave}
       >
         <header className="sticky top-0 z-20 border-b border-black/10 bg-[#13151a] text-white">
-          <div className="mx-auto flex max-w-[1800px] items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-            <div className="flex min-w-0 items-center gap-4">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#1f4fff] shadow-[0_12px_30px_rgba(31,79,255,0.35)]">
-                <AudioLines className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg font-semibold tracking-tight">{APP_NAME}</span>
-                  <Badge className="border border-white/15 bg-white/10 text-white">Local-first audio workspace</Badge>
+          <div className="mx-auto max-w-[1800px] px-4 py-3 sm:px-6 lg:px-8">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex min-w-0 items-start gap-3 sm:items-center sm:gap-4">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#1f4fff] shadow-[0_12px_30px_rgba(31,79,255,0.35)]">
+                  <AudioLines className="h-5 w-5" />
                 </div>
-                <div className="text-sm text-white/60">
-                  Transcript, timeline, memory, and evidence-linked outputs. No paid API in the core flow.
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-lg font-semibold tracking-tight">{APP_NAME}</span>
+                    <Badge className="border border-white/15 bg-white/10 text-white">Local-first audio workspace</Badge>
+                  </div>
+                  <div className="mt-1 max-w-2xl text-sm leading-6 text-white/65">
+                    Transcript, timeline, memory, and evidence-linked outputs. No paid API in the core flow.
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
-                <ShieldCheck className="h-4 w-4 text-[#86efac]" />
-                <span>{LOCAL_PROCESSING_NOTE}</span>
+              <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                  <ShieldCheck className="h-4 w-4 text-[#86efac]" />
+                  <span className="sm:hidden">Runs on-device</span>
+                  <span className="hidden sm:inline">{LOCAL_PROCESSING_NOTE}</span>
+                </div>
+                <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm sm:flex">
+                  <Cpu className="h-4 w-4 text-[#a5b4fc]" />
+                  <span>{runtime === "webgpu" ? "WebGPU local runtime" : "WASM local runtime"}</span>
+                </div>
+                <div
+                  className={`rounded-full border px-3 py-2 text-sm ${
+                    setupReady
+                      ? "border-[#2f5f38] bg-[#173321] text-[#bdf7c5]"
+                      : "border-white/10 bg-white/5 text-white/75"
+                  }`}
+                >
+                  {setupReady ? "Offline primed" : "Cold-start setup pending"}
+                </div>
+                {queuedProjects.length > 0 ? (
+                  <div className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                    Queue {queuedProjects.length}
+                  </div>
+                ) : null}
+                {!emptyState ? (
+                  <Button
+                    onClick={openFilePicker}
+                    className="bg-[#1f4fff] text-white hover:bg-[#1a43d6]"
+                  >
+                    <FolderOpen className="mr-2 h-4 w-4" />
+                    Add media
+                  </Button>
+                ) : null}
               </div>
-              <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm">
-                <Cpu className="h-4 w-4 text-[#a5b4fc]" />
-                <span>{runtime === "webgpu" ? "WebGPU local runtime" : "WASM local runtime"}</span>
-              </div>
-              <div className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
-                Queue {queuedProjects.length}
-              </div>
-              <div
-                className={`rounded-full border px-3 py-2 text-sm ${
-                  assetSetup.modelReady && assetSetup.mediaReady
-                    ? "border-[#2f5f38] bg-[#173321] text-[#bdf7c5]"
-                    : "border-white/10 bg-white/5 text-white/75"
-                }`}
-              >
-                {assetSetup.modelReady && assetSetup.mediaReady ? "Offline primed" : "Cold-start setup pending"}
-              </div>
-              <Button
-                onClick={openFilePicker}
-                className="bg-[#1f4fff] text-white hover:bg-[#1a43d6]"
-              >
-                <FolderOpen className="mr-2 h-4 w-4" />
-                Add media
-              </Button>
             </div>
           </div>
         </header>
 
-        <div className="mx-auto grid max-w-[1800px] grid-cols-1 gap-5 px-4 py-5 sm:px-6 lg:grid-cols-[300px_minmax(0,1fr)_380px] lg:px-8">
-          <aside className="overflow-hidden rounded-[28px] border border-black/10 bg-[#faf7f1] shadow-[0_18px_60px_rgba(30,35,45,0.08)]">
+        <div className="mx-auto grid max-w-[1800px] grid-cols-1 items-start gap-4 px-4 py-4 sm:gap-5 sm:px-6 lg:grid-cols-[minmax(280px,320px)_minmax(0,1fr)_minmax(300px,340px)] lg:px-8 xl:grid-cols-[320px_minmax(0,1fr)_340px]">
+          <aside className="order-2 self-start overflow-hidden rounded-[28px] border border-black/10 bg-[#faf7f1] shadow-[0_18px_60px_rgba(30,35,45,0.08)] lg:order-none">
             <div className="border-b border-black/10 px-5 py-5">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -251,13 +259,13 @@ export function TranscribbleApp() {
                   ref={librarySearchRef}
                   value={libraryQuery}
                   onChange={(event) => setLibraryQuery(event.target.value)}
-                  placeholder="Search across projects and transcript spans"
+                  placeholder="Search titles and transcript text"
                   className="border-black/10 bg-white pl-10 text-sm"
                 />
               </div>
             </div>
 
-            <div className="max-h-[calc(100vh-11rem)] overflow-y-auto px-3 py-4">
+            <div className="px-3 py-4 lg:max-h-[calc(100svh-8rem)] lg:overflow-y-auto">
               {capabilityIssue ? (
                 <Banner tone="error" body={capabilityIssue} onDismiss={() => setNotice(null)} />
               ) : null}
@@ -301,6 +309,7 @@ export function TranscribbleApp() {
                       <EmptyPanel
                         title="Nothing in flight"
                         body="Drop multiple files and the workspace will process them locally in order."
+                        compact
                       />
                     )}
                   </section>
@@ -322,6 +331,7 @@ export function TranscribbleApp() {
                       <EmptyPanel
                         title="Your local library starts here"
                         body="Completed sessions stay saved locally for search, export, and later review."
+                        compact
                       />
                     )}
                   </section>
@@ -346,21 +356,21 @@ export function TranscribbleApp() {
             </div>
           </aside>
 
-          <main className="min-w-0 space-y-5">
+          <main className="order-1 min-w-0 space-y-5 lg:order-none">
             <WorkspaceSurface className="overflow-hidden">
               {workspaceReady ? (
                 emptyState ? (
-                  <div className="flex min-h-[70vh] flex-col items-center justify-center px-8 py-16 text-center">
-                    <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-[#1f4fff] text-white shadow-[0_16px_40px_rgba(31,79,255,0.28)]">
+                  <div className="flex min-h-[clamp(28rem,58vh,36rem)] flex-col items-center justify-center px-6 py-12 text-center sm:px-8 sm:py-14 lg:px-12">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-[24px] bg-[#1f4fff] text-white shadow-[0_16px_40px_rgba(31,79,255,0.28)]">
                       <AudioLines className="h-7 w-7" />
                     </div>
-                    <div className="mt-8 text-xs font-semibold uppercase tracking-[0.26em] text-[#6f6a60]">
+                    <div className="mt-6 text-xs font-semibold uppercase tracking-[0.26em] text-[#6f6a60]">
                       Privacy-first workspace
                     </div>
-                    <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-[#101218] sm:text-5xl">
+                    <h1 className="mt-3 max-w-[13.5ch] text-[clamp(2.6rem,4.4vw,4.6rem)] font-semibold leading-[0.95] tracking-[-0.05em] text-[#101218]">
                       Turn raw audio into a searchable local workspace.
                     </h1>
-                    <p className="mt-4 max-w-2xl text-pretty text-base leading-7 text-[#5c5a52]">
+                    <p className="mt-4 max-w-xl text-pretty text-base leading-7 text-[#5c5a52]">
                       Queue recordings, revisit prior sessions, edit timestamped segments, save moments, export usable
                       artifacts, and keep the entire core workflow on-device.
                     </p>
@@ -372,15 +382,15 @@ export function TranscribbleApp() {
                         <FolderOpen className="mr-2 h-4 w-4" />
                         Add local media
                       </Button>
-                      <Badge className="border border-black/10 bg-white px-4 py-2 text-[#2b2d35]">
+                      <div className="rounded-full border border-black/10 bg-white/80 px-4 py-2 text-sm font-medium text-[#363943]">
                         Queue multiple files, keep everything local
-                      </Badge>
+                      </div>
                     </div>
                   </div>
                 ) : (
-                  <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,360px)]">
-                    <div className="min-w-0 space-y-5 border-b border-black/10 px-5 py-5 xl:border-b-0 xl:border-r">
-                      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_minmax(320px,360px)]">
+                    <div className="min-w-0 space-y-5 border-b border-black/10 px-5 py-5 2xl:border-b-0 2xl:border-r">
+                      <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-start 2xl:justify-between">
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-semibold uppercase tracking-[0.24em] text-[#6d6a61]">
                             Workspace
@@ -419,7 +429,7 @@ export function TranscribbleApp() {
 
                       <div className="rounded-[26px] border border-black/10 bg-[#f3ede2] p-4">
                         <div className="flex flex-col gap-5">
-                          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                          <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-start 2xl:justify-between">
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-center gap-3">
                                 <Button
@@ -707,7 +717,7 @@ export function TranscribbleApp() {
                       </div>
                     </div>
 
-                    <div className="max-h-[calc(100vh-8rem)] overflow-y-auto px-5 py-5">
+                    <div className="px-5 py-5 2xl:max-h-[calc(100svh-8rem)] 2xl:overflow-y-auto">
                       <div className="rounded-[26px] border border-black/10 bg-[#fcfbf7] p-3">
                         <div className="grid grid-cols-2 gap-2">
                           <InspectorTabButton
@@ -968,7 +978,7 @@ export function TranscribbleApp() {
                               </div>
                               <div className="mt-3 space-y-2 text-sm text-[#252932]">
                                 <Shortcut hint="Search transcript" keys={["/"]} />
-                                <Shortcut hint="Search library" keys={["Ctrl", "K"]} />
+                                <Shortcut hint="Search library" keys={["Cmd/Ctrl", "K"]} />
                                 <Shortcut hint="Play or pause" keys={["Space"]} />
                                 <Shortcut hint="Bookmark selection" keys={["B"]} />
                                 <Shortcut hint="Next or previous segment" keys={["J", "K"]} />
@@ -988,10 +998,10 @@ export function TranscribbleApp() {
             </WorkspaceSurface>
           </main>
 
-          <aside className="space-y-5">
+          <aside className="order-3 self-start space-y-4 lg:order-none lg:space-y-5">
             <WorkspaceSurface className="p-5">
               <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">Workspace notes</div>
-              <div className="mt-4 space-y-3 text-sm text-[#5c5a52]">
+              <div className="mt-4 divide-y divide-black/10 text-sm text-[#5c5a52]">
                 <InfoBox
                   icon={ShieldCheck}
                   title="Local persistence"
@@ -1014,7 +1024,7 @@ export function TranscribbleApp() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">Quick status</div>
-                  <div className="mt-1 text-lg font-semibold tracking-tight">What the workspace sees</div>
+                  <div className="mt-1 text-lg font-semibold tracking-tight">Queue and library</div>
                 </div>
                 <Badge className="border border-black/10 bg-white text-[#2b2d35]">{projects.length} projects</Badge>
               </div>
@@ -1853,20 +1863,30 @@ function EmptyPanel({
   title,
   body,
   icon: Icon = FolderOpen,
+  compact = false,
 }: {
   title: string;
   body: string;
   icon?: typeof FolderOpen;
+  compact?: boolean;
 }) {
   return (
-    <div className="rounded-[22px] border border-dashed border-black/10 bg-[#f8f4eb] px-4 py-5 text-sm text-[#5c5a52]">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-black/10 bg-white">
+    <div
+      className={`rounded-[22px] border border-dashed border-black/10 bg-[#f8f4eb] text-sm text-[#5c5a52] ${
+        compact ? "px-4 py-4" : "px-4 py-5"
+      }`}
+    >
+      <div className={`flex gap-3 ${compact ? "items-start" : "items-center"}`}>
+        <div
+          className={`flex items-center justify-center rounded-2xl border border-black/10 bg-white ${
+            compact ? "h-9 w-9" : "h-10 w-10"
+          }`}
+        >
           <Icon className="h-4 w-4 text-[#2b2d35]" />
         </div>
         <div>
           <div className="font-medium text-[#171a20]">{title}</div>
-          <div className="mt-1">{body}</div>
+          <div className="mt-1 text-pretty">{body}</div>
         </div>
       </div>
     </div>
@@ -1883,9 +1903,9 @@ function InfoBox({
   body: string;
 }) {
   return (
-    <div className="rounded-2xl border border-black/10 bg-white p-4">
+    <div className="py-3 first:pt-0 last:pb-0">
       <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#eef2ff] text-[#1f4fff]">
+        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl bg-[#eef2ff] text-[#1f4fff]">
           <Icon className="h-4 w-4" />
         </div>
         <div>
@@ -1939,7 +1959,7 @@ function MiniStat({
   value: string;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm">
+    <div className="flex items-center justify-between rounded-2xl border border-black/10 bg-white px-4 py-2.5 text-sm">
       <span className="text-[#5c5a52]">{label}</span>
       <span className="font-medium text-[#171a20]">{value}</span>
     </div>
