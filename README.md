@@ -84,34 +84,6 @@ The “intelligence” features are intentionally non-hosted and inspectable:
 
 No paid inference API or mandatory cloud backend was introduced.
 
-### Enrichment architecture
-
-A pluggable enrichment provider system is available behind feature flags:
-
-- Provider registry for cache-first external lookups
-- IndexedDB-backed result caching with 7-day TTL
-- Rate limiting and request deduplication
-- Feature flags stored in `localStorage` — all enrichments disabled by default
-- No provider is enabled or required in the default build
-
-## Fully Local vs Optional
-
-### Fully local today
-
-These features do not require a paid API or hosted backend:
-
-- transcription runtime orchestration
-- media decoding and extraction
-- queued processing
-- project persistence
-- transcript editing
-- bookmarks and highlights
-- pause-derived turn navigation
-- chapters and key moments
-- local search
-- summary/action/question/date/entity/glossary extraction
-- exports
-
 ### Optional enrichments
 
 No live third-party enrichment provider is required or enabled in this build.
