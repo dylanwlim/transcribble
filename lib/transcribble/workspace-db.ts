@@ -1,4 +1,5 @@
 import type { CachedLookup, TranscriptProject } from "@/lib/transcribble/types";
+import { chooseMediaStorageBackend, createOpfsFileName, isOpfsSupported } from "@/lib/transcribble/storage";
 
 const DB_NAME = "transcribble-workspace";
 const DB_VERSION = 1;
@@ -6,10 +7,32 @@ const PROJECT_STORE = "projects";
 const FILE_STORE = "files";
 const CACHE_STORE = "cache";
 
-interface StoredFileRecord {
+interface LegacyStoredFileRecord {
   projectId: string;
   file: File;
 }
+
+interface IndexedDbFileRecord {
+  projectId: string;
+  adapter: "indexeddb";
+  file: File;
+  name: string;
+  type: string;
+  size: number;
+  lastModified: number;
+}
+
+interface OpfsFileRecord {
+  projectId: string;
+  adapter: "opfs";
+  opfsFileName: string;
+  name: string;
+  type: string;
+  size: number;
+  lastModified: number;
+}
+
+type StoredFileRecord = LegacyStoredFileRecord | IndexedDbFileRecord | OpfsFileRecord;
 
 function requestToPromise<T>(request: IDBRequest<T>) {
   return new Promise<T>((resolve, reject) => {
@@ -26,6 +49,18 @@ function transactionDone(transaction: IDBTransaction) {
   });
 }
 
+function isLegacyFileRecord(record: StoredFileRecord | undefined): record is LegacyStoredFileRecord {
+  return Boolean(record && "file" in record && !("adapter" in record));
+}
+
+function isIndexedDbFileRecord(record: StoredFileRecord | undefined): record is IndexedDbFileRecord {
+  return Boolean(record && "adapter" in record && record.adapter === "indexeddb");
+}
+
+function isOpfsFileRecord(record: StoredFileRecord | undefined): record is OpfsFileRecord {
+  return Boolean(record && "adapter" in record && record.adapter === "opfs");
+}
+
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 function openDatabase() {
@@ -34,11 +69,6 @@ function openDatabase() {
   }
 
   dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-    if (typeof indexedDB === "undefined") {
-      reject(new Error("IndexedDB is not available in this browser environment."));
-      return;
-    }
-
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onupgradeneeded = () => {
@@ -57,69 +87,148 @@ function openDatabase() {
       }
     };
 
-    request.onsuccess = () => {
-      const database = request.result;
-
-      database.onclose = () => {
-        dbPromise = null;
-      };
-
-      database.onversionchange = () => {
-        database.close();
-        dbPromise = null;
-      };
-
-      resolve(database);
-    };
-
-    request.onerror = () => {
-      dbPromise = null;
-      reject(request.error ?? new Error("Failed to open IndexedDB"));
-    };
-
-    request.onblocked = () => {
-      dbPromise = null;
-      reject(new Error("IndexedDB is blocked by another connection. Close other tabs and retry."));
-    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Failed to open IndexedDB"));
   });
 
   return dbPromise;
 }
 
-async function withRetry<T>(operation: () => Promise<T>): Promise<T> {
+async function getStoredFileRecord(projectId: string) {
+  const database = await openDatabase();
+  const transaction = database.transaction(FILE_STORE, "readonly");
+  const record = (await requestToPromise(transaction.objectStore(FILE_STORE).get(projectId))) as
+    | StoredFileRecord
+    | undefined;
+  await transactionDone(transaction);
+
+  return record;
+}
+
+async function getOpfsMediaDirectory() {
+  if (typeof navigator === "undefined" || !navigator.storage || typeof navigator.storage.getDirectory !== "function") {
+    return null;
+  }
+
+  const rootDirectory = await navigator.storage.getDirectory();
+  return rootDirectory.getDirectoryHandle("transcribble-media", { create: true });
+}
+
+async function writeFileToOpfs(projectId: string, file: File) {
+  const directory = await getOpfsMediaDirectory();
+
+  if (!directory) {
+    return null;
+  }
+
+  const opfsFileName = createOpfsFileName(projectId, file.name);
+  const handle = await directory.getFileHandle(opfsFileName, { create: true });
+  const writable = await handle.createWritable();
+  await writable.write(file);
+  await writable.close();
+
+  return {
+    projectId,
+    adapter: "opfs",
+    opfsFileName,
+    name: file.name,
+    type: file.type || "application/octet-stream",
+    size: file.size,
+    lastModified: file.lastModified,
+  } satisfies OpfsFileRecord;
+}
+
+function buildIndexedDbFileRecord(projectId: string, file: File) {
+  return {
+    projectId,
+    adapter: "indexeddb",
+    file,
+    name: file.name,
+    type: file.type || "application/octet-stream",
+    size: file.size,
+    lastModified: file.lastModified,
+  } satisfies IndexedDbFileRecord;
+}
+
+async function removeOpfsFile(record: OpfsFileRecord) {
+  const directory = await getOpfsMediaDirectory();
+
+  if (!directory) {
+    return;
+  }
+
   try {
-    return await operation();
-  } catch (error) {
-    if (
-      error instanceof DOMException &&
-      (error.name === "InvalidStateError" || error.name === "TransactionInactiveError")
-    ) {
-      dbPromise = null;
-      return operation();
-    }
-    throw error;
+    await directory.removeEntry(record.opfsFileName);
+  } catch {
+    return;
   }
 }
 
-export async function listProjects() {
-  return withRetry(async () => {
-    const database = await openDatabase();
-    const transaction = database.transaction(PROJECT_STORE, "readonly");
-    const store = transaction.objectStore(PROJECT_STORE);
-    const records = await requestToPromise(store.getAll());
-    await transactionDone(transaction);
+async function readStoredMediaFile(record: StoredFileRecord | undefined) {
+  if (!record) {
+    return null;
+  }
 
-    return (records as TranscriptProject[]).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-  });
+  if (isLegacyFileRecord(record) || isIndexedDbFileRecord(record)) {
+    return record.file;
+  }
+
+  if (!isOpfsFileRecord(record)) {
+    return null;
+  }
+
+  const directory = await getOpfsMediaDirectory();
+  if (!directory) {
+    return null;
+  }
+
+  try {
+    const handle = await directory.getFileHandle(record.opfsFileName);
+    const file = await handle.getFile();
+
+    if (file.name === record.name && file.type === record.type && file.lastModified === record.lastModified) {
+      return file;
+    }
+
+    return new File([file], record.name, {
+      type: record.type,
+      lastModified: record.lastModified,
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function putStoredMediaFile(projectId: string, file: File) {
+  if (isOpfsSupported() && chooseMediaStorageBackend(file.size, true) === "opfs") {
+    try {
+      const opfsRecord = await writeFileToOpfs(projectId, file);
+      if (opfsRecord) {
+        return opfsRecord as StoredFileRecord;
+      }
+    } catch {
+      // Fall through to IndexedDB.
+    }
+  }
+
+  return buildIndexedDbFileRecord(projectId, file) as StoredFileRecord;
+}
+
+export async function listProjects() {
+  const database = await openDatabase();
+  const transaction = database.transaction(PROJECT_STORE, "readonly");
+  const store = transaction.objectStore(PROJECT_STORE);
+  const records = await requestToPromise(store.getAll());
+  await transactionDone(transaction);
+
+  return (records as TranscriptProject[]).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
 export async function putProject(project: TranscriptProject) {
-  return withRetry(async () => {
-    const database = await openDatabase();
-    const transaction = database.transaction(PROJECT_STORE, "readwrite");
-    transaction.objectStore(PROJECT_STORE).put(project);
-    await transactionDone(transaction);
-  });
+  const database = await openDatabase();
+  const transaction = database.transaction(PROJECT_STORE, "readwrite");
+  transaction.objectStore(PROJECT_STORE).put(project);
+  await transactionDone(transaction);
 }
 
 export async function putProjects(projects: TranscriptProject[]) {
@@ -135,47 +244,38 @@ export async function putProjects(projects: TranscriptProject[]) {
 }
 
 export async function putProjectWithFile(project: TranscriptProject, file: File) {
-  return withRetry(async () => {
-    const database = await openDatabase();
-    const transaction = database.transaction([PROJECT_STORE, FILE_STORE], "readwrite");
-    transaction.objectStore(PROJECT_STORE).put(project);
-    transaction.objectStore(FILE_STORE).put({
-      projectId: project.fileStoreKey,
-      file,
-    } satisfies StoredFileRecord);
-    await transactionDone(transaction);
-  });
+  const storedFile = await putStoredMediaFile(project.fileStoreKey, file);
+  const database = await openDatabase();
+  const transaction = database.transaction([PROJECT_STORE, FILE_STORE], "readwrite");
+  transaction.objectStore(PROJECT_STORE).put(project);
+  transaction.objectStore(FILE_STORE).put(storedFile);
+  await transactionDone(transaction);
 }
 
 export async function deleteProject(project: Pick<TranscriptProject, "id" | "fileStoreKey">) {
+  const storedFile = await getStoredFileRecord(project.fileStoreKey);
   const database = await openDatabase();
   const transaction = database.transaction([PROJECT_STORE, FILE_STORE], "readwrite");
   transaction.objectStore(PROJECT_STORE).delete(project.id);
   transaction.objectStore(FILE_STORE).delete(project.fileStoreKey);
   await transactionDone(transaction);
+
+  if (isOpfsFileRecord(storedFile)) {
+    await removeOpfsFile(storedFile);
+  }
 }
 
 export async function putProjectFile(projectId: string, file: File) {
+  const storedFile = await putStoredMediaFile(projectId, file);
   const database = await openDatabase();
   const transaction = database.transaction(FILE_STORE, "readwrite");
-  transaction.objectStore(FILE_STORE).put({
-    projectId,
-    file,
-  } satisfies StoredFileRecord);
+  transaction.objectStore(FILE_STORE).put(storedFile);
   await transactionDone(transaction);
 }
 
 export async function getProjectFile(fileStoreKey: string) {
-  return withRetry(async () => {
-    const database = await openDatabase();
-    const transaction = database.transaction(FILE_STORE, "readonly");
-    const record = (await requestToPromise(
-      transaction.objectStore(FILE_STORE).get(fileStoreKey),
-    )) as StoredFileRecord | undefined;
-    await transactionDone(transaction);
-
-    return record?.file ?? null;
-  });
+  const record = await getStoredFileRecord(fileStoreKey);
+  return readStoredMediaFile(record);
 }
 
 export async function getCachedLookup<T>(key: string) {

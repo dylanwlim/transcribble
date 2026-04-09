@@ -1,156 +1,85 @@
 # Transcribble
 
-Transcribble is a local-first audio workspace built around on-device transcription. Instead of stopping at `upload -> transcript -> txt`, it turns recordings into persistent local projects with a media timeline, editable timestamped segments, grounded extracted outputs, and reusable cross-project search.
+Transcribble is a private voice workspace for turning recordings into searchable, editable knowledge on this device.
 
-## What Changed
+It is not a chatbot shell and it is not a hosted transcription dashboard. The core flow is local-first:
 
-This repo now behaves more like an audio IDE than a single-use transcription wrapper:
+- add audio or video
+- transcribe it in the browser
+- review the transcript against time-linked evidence
+- save moments and review ranges
+- reopen, search, edit, and export later from the same browser
 
-- Persistent local project library backed by IndexedDB
-- Queue-based local transcription for multiple audio/video files
-- Timestamp-aware transcript timeline with click-to-seek
-- Local media persistence so projects can be reopened later
-- Editable transcript segments with autosave
-- Bookmarks, highlights, chapters, and key moments
-- Local search within a transcript and across the saved library
-- Grounded local extraction for summaries, action items, questions, dates, entities, glossary terms, and review cues
-- Multi-format export: `txt`, `md`, `srt`, `vtt`
-- Session-map timeline with chapters, pause-derived turns, marks, and search hit visibility
-- Speech density waveform visualization on the timeline
-- Tabbed inspector for selection, outline, insights, and session setup
-- Manual speaker label assignment on pause-derived turns
-- Auto-scroll to the active transcript segment during playback
-- React error boundary for crash recovery without data loss
-- IndexedDB connection recovery with automatic retry
-- Enrichment provider architecture (feature-flagged, cache-first, no paid APIs)
-- Expanded format support: `.ogg`, `.webm`, `.flac`, `.aac`
-- Safer delete handling and stronger atomic project/file persistence
-- Local setup/priming flow for the transcription model and media runtime
-- Keyboard shortcuts for transcript and library workflows
-- 63 unit tests covering transcript core, media validation, projects, and enrichment
+## What The Product Does
 
-## Product Direction
+- Saves recordings, transcripts, edits, highlights, and saved review ranges in local browser storage
+- Builds timestamped transcript segments, chapters, turns, and grounded local outputs
+- Keeps cross-session search local, including transcript hits and saved review ranges
+- Exports plain text, markdown, SRT, and VTT from the same saved session
 
-The core product is now:
+## Privacy And Cost
 
-- local-first
-- privacy-preserving
-- zero-marginal-cost in the core flow
-- inspectable rather than fake “AI”
-- grounded in transcript spans and timestamps
+- No paid API is required for the core workflow
+- No mandatory cloud backend is required for the core workflow
+- Recordings and transcript work stay in browser storage on this device
+- Search, review cues, summaries, questions, dates, glossary terms, and saved review ranges are built locally
 
-The transcript is treated as source material for a broader workspace:
+## First-Time Setup And Offline Caveat
 
-- timeline navigation
-- reusable project memory
-- deterministic extraction
-- exportable artifacts
-- review and editing workflow
+Transcribble does local processing, but a brand-new browser profile still needs one online setup before fully local repeat use works.
 
-## Architecture
+On first setup the browser downloads:
 
-### Frontend
+- the local transcription model
+- the media runtime used for video imports and browser fallback decoding
 
-- Next.js 15
-- React 19
-- TypeScript
-- Tailwind CSS
+After those are cached, normal use can stay local in that browser profile.
 
-### Local processing
+Important note:
 
-- `@huggingface/transformers` for Whisper inference in a web worker
-- `@ffmpeg/ffmpeg` for local audio extraction from video or browser decode fallback
+- This app does not claim true first-run offline support from a cold browser profile
+- If the browser has never downloaded the local assets before, internet is still required once
 
-### Local persistence
+## Storage
 
-- IndexedDB stores project metadata, source media files, and reusable workspace state
-- Automatic connection recovery with retry on `InvalidStateError` / `TransactionInactiveError`
+Transcribble now uses:
 
-### Deterministic intelligence layer
+- IndexedDB for project metadata, search data, and fallback media storage
+- OPFS for larger local media files when the browser supports the private file system
 
-The “intelligence” features are intentionally non-hosted and inspectable:
+Existing saved projects are preserved. The storage change is additive and falls back safely when OPFS is unavailable.
 
-- transcript segmentation from timestamped chunks
-- explicit pause-derived turn map for navigation and future speaker attribution
-- chapter generation from structure and repeated terms
-- extractive summaries
-- action-item detection
-- question extraction
-- explicit date/deadline spotting
-- entity and glossary extraction
-- key-moment scoring
-- transcript review cues
-- local full-text search index
+The app also surfaces:
 
-No paid inference API or mandatory cloud backend was introduced.
+- whether the browser reports durable storage protection
+- storage usage and quota when the browser exposes it
+- whether larger recordings can use the private file system
+- browser notes that affect local reliability
 
-### Optional enrichments
+## Installability
 
-No live third-party enrichment provider is required or enabled in this build.
+This repo now includes a basic installable web-app foundation:
 
-The current implementation deliberately prioritizes local utility over bolt-on public APIs. If public/open-data enrichments are added later, they should remain:
+- web manifest
+- generated app icons
+- a lightweight service worker for quicker reopen support
+- install prompt wiring when the browser exposes it
 
-- optional
-- cache-first
-- adapter-based
-- rate-limited
-- failure-tolerant
-- non-blocking for the core workflow
+This improves reopenability and app-like launch behavior, but it does not change the first-run offline note above.
 
-## Important Offline Note
+## Core Review Workflow
 
-Core processing is local, but the first run still needs model/runtime assets to be downloaded and cached by the browser:
+Transcribble supports two kinds of review markers:
 
-- Whisper model assets are fetched on first use and then cached locally by the browser/runtime
-- `ffmpeg.wasm` runtime assets are fetched on first use and then cached
-- The app now exposes a setup/priming flow so users can warm those assets before they need an offline session
+- quick marks: bookmarks and highlights on individual transcript lines
+- saved review ranges: named time ranges tied back to transcript segments
 
-After those assets are cached, normal use stays local. Cold-start offline use from a brand-new browser profile is not yet fully bundled in-repo.
+Saved review ranges:
 
-If strict first-run offline support is required, the next step would be shipping the model/runtime assets locally instead of relying on first-use downloads.
-
-## Workspace UX
-
-### Library
-
-- local project persistence
-- queue visibility
-- safer retry/delete controls
-- cross-project search
-- title-only search hits for queued or not-yet-transcribed projects
-
-### Timeline
-
-- session-map overview strip with chapter bands, turn boundaries, marks, search hit markers, and the live playhead
-- timestamped transcript segments
-- active playback highlighting
-- click-to-seek
-- inline match highlighting
-
-### Editing
-
-- autosaved segment editing
-- title editing
-- bookmarks and color highlights
-- saved-mark labels stay aligned with edited transcript text
-
-### Outputs
-
-- grounded summary bullets
-- linked action items
-- linked open questions
-- linked date references
-- linked saved moments and key moments in markdown export
-- extracted entities and glossary terms
-- review cues for ambiguous segments
-
-## Keyboard Shortcuts
-
-- `/` focus transcript search
-- `Ctrl/Cmd + K` focus library search
-- `Space` play or pause media
-- `B` toggle bookmark on the selected segment
-- `J` / `K` move to next or previous segment
+- appear on the session map
+- show up in the session outline
+- are searchable in the library
+- are included in markdown export
 
 ## Development
 
@@ -169,33 +98,20 @@ npm test
 npm run build
 ```
 
-## File Layout
+## Main Files
 
 - [app/page.tsx](/Users/dylan/Projects/Dev/transcribble/app/page.tsx): app entry
-- [components/transcribble-app.tsx](/Users/dylan/Projects/Dev/transcribble/components/transcribble-app.tsx): multi-pane audio workspace UI
-- [hooks/use-transcribble.ts](/Users/dylan/Projects/Dev/transcribble/hooks/use-transcribble.ts): workspace controller, queue, playback, autosave
-- [workers/transcriber.worker.ts](/Users/dylan/Projects/Dev/transcribble/workers/transcriber.worker.ts): local Whisper worker
-- [lib/transcribble/workspace-db.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/workspace-db.ts): IndexedDB project/media storage
-- [lib/transcribble/analysis.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/analysis.ts): deterministic transcript intelligence layer
-- [lib/transcribble/export.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/export.ts): `txt`/`md`/`srt`/`vtt` exports
-- [lib/transcribble/search.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/search.ts): transcript and library search
-- [lib/transcribble/enrichment.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/enrichment.ts): feature-flagged enrichment provider architecture
-- [components/error-boundary.tsx](/Users/dylan/Projects/Dev/transcribble/components/error-boundary.tsx): React error boundary for crash recovery
-- [tests/](/Users/dylan/Projects/Dev/transcribble/tests/): unit tests for transcript, media, projects, and enrichment
+- [components/transcribble-app.tsx](/Users/dylan/Projects/Dev/transcribble/components/transcribble-app.tsx): main workspace UI
+- [hooks/use-transcribble.ts](/Users/dylan/Projects/Dev/transcribble/hooks/use-transcribble.ts): workspace controller
+- [lib/transcribble/workspace-db.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/workspace-db.ts): IndexedDB and OPFS-backed storage adapter
+- [lib/transcribble/status.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/status.ts): unified user-facing processing language
+- [lib/transcribble/ranges.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/ranges.ts): saved review range helpers
+- [lib/transcribble/search.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/search.ts): local search across sessions
+- [lib/transcribble/export.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/export.ts): text, markdown, and caption export
 
-## Current Limitations
+## Known Limits
 
-- True speaker diarization is not implemented. Manual speaker labels can be assigned to pause-derived turns, but the app does not claim automatic speaker identity or confidence.
-- Confidence scores from the model are not exposed directly; the UI shows deterministic review cues instead.
-- First-run asset download is still required before the app can operate fully offline from cache, even though the setup panel can now prime those caches proactively.
-- Very large files can still hit browser memory limits depending on hardware and browser runtime support.
-
-## Best Next Steps
-
-Highest-leverage follow-ons after this pass:
-
-1. Add true speaker diarization using a practical local-only pipeline to complement the manual speaker labels.
-2. Bundle model/runtime assets or ship an installable desktop shell for stricter offline guarantees.
-3. Add range-based waveform highlights tied to bookmarks and chapters.
-4. Wire enrichment providers to real free/open data sources behind the existing feature flag system.
-5. Add a semantic local index if the model/runtime footprint can be justified.
+- Speaker diarization is still not implemented
+- First-run offline use still depends on one online setup
+- Browser memory limits still apply to very large recordings
+- Some browsers do not expose durable storage or private file system support

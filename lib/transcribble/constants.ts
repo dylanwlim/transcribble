@@ -17,14 +17,14 @@ export type Runtime = "webgpu" | "wasm";
 export const MODEL_ID = "onnx-community/whisper-base_timestamped";
 
 export const RUNTIME_LABELS: Record<Runtime, string> = {
-  webgpu: "WebGPU acceleration",
-  wasm: "WebAssembly fallback",
+  webgpu: "Fast local mode",
+  wasm: "Standard local mode",
 };
 
 export const MODEL_LABELS: Record<Runtime, string> = {
   webgpu: "Whisper base timestamped",
-  wasm: "Whisper base timestamped (quantized)",
+  wasm: "Whisper base timestamped (smaller local build)",
 };
 
 export const LOCAL_PROCESSING_NOTE =
-  "Runs on-device. First use downloads local model files and caches them for later use.";
+  "Saved on this device. The first use downloads the local tools this browser needs.";

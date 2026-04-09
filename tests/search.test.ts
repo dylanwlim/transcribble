@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { buildTranscriptDocument } from "@/lib/transcribble/analysis";
 import { searchProjectLibrary } from "@/lib/transcribble/search";
-import type { TranscriptProject, TranscriptPayload } from "@/lib/transcribble/types";
+import type { SavedRange, TranscriptProject, TranscriptPayload } from "@/lib/transcribble/types";
 
 const payload: TranscriptPayload = {
   text: "",
@@ -31,6 +31,7 @@ function buildProject(overrides: Partial<TranscriptProject>): TranscriptProject 
     duration: overrides.duration ?? 7.8,
     fileStoreKey: overrides.fileStoreKey ?? overrides.id ?? "project-1",
     marks: overrides.marks ?? [],
+    savedRanges: overrides.savedRanges ?? [],
     transcript: overrides.transcript,
   };
 }
@@ -73,4 +74,35 @@ test("library search still returns transcript span matches", () => {
   assert.equal(results[0]?.projectId, "ready-project");
   assert.equal(results[0]?.matchKind, "segment");
   assert.match(results[0]?.entry.text ?? "", /evidence links/i);
+});
+
+test("library search returns saved review ranges", () => {
+  const transcript = buildTranscriptDocument("ready-project", payload, 7.8);
+  const savedRanges: SavedRange[] = [
+    {
+      id: "range-1",
+      label: "Evidence link handoff",
+      createdAt: new Date("2026-03-31T09:35:00Z").toISOString(),
+      start: 3.7,
+      end: 7.8,
+      segmentIds: [transcript.segments[1]?.id ?? "ready-project-segment-2"],
+      note: "Keep source links intact.",
+    },
+  ];
+
+  const results = searchProjectLibrary(
+    [
+      buildProject({
+        id: "ready-project",
+        title: "Launch Review",
+        transcript,
+        savedRanges,
+      }),
+    ],
+    "handoff",
+  );
+
+  assert.equal(results[0]?.projectId, "ready-project");
+  assert.equal(results[0]?.matchKind, "saved-range");
+  assert.match(results[0]?.entry.text ?? "", /evidence link handoff/i);
 });

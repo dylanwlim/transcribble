@@ -2,6 +2,7 @@ import {
   LOCAL_PROCESSING_NOTE,
   type Runtime,
 } from "@/lib/transcribble/constants";
+import { getDefaultProjectStep } from "@/lib/transcribble/status";
 import { getFileExtension } from "@/lib/transcribble/media";
 import type { MediaKind, TranscriptProject } from "@/lib/transcribble/types";
 
@@ -34,27 +35,45 @@ export function createProjectFromFile(file: File, runtime: Runtime): TranscriptP
     createdAt: now,
     updatedAt: now,
     status: "queued",
+    step: "queued",
     progress: 0,
-    stageLabel: "Queued",
+    stageLabel: "Waiting to start",
     detail: LOCAL_PROCESSING_NOTE,
     runtime,
     fileStoreKey: id,
     marks: [],
+    savedRanges: [],
+  };
+}
+
+function normalizeProject(project: TranscriptProject): TranscriptProject {
+  return {
+    ...project,
+    step: project.step ?? getDefaultProjectStep(project.status),
+    marks: project.marks ?? [],
+    savedRanges: project.savedRanges ?? [],
   };
 }
 
 export function recoverPersistedProjects(projects: TranscriptProject[]) {
   return projects.map((project) => {
-    if (project.status === "ready" || project.status === "error" || project.status === "paused") {
-      return project;
+    const normalizedProject = normalizeProject(project);
+
+    if (
+      project.status === "ready" ||
+      project.status === "error" ||
+      project.status === "paused"
+    ) {
+      return normalizedProject;
     }
 
     return {
-      ...project,
+      ...normalizedProject,
       status: "queued" as const,
+      step: "queued" as const,
       progress: 0,
-      stageLabel: "Recovered",
-      detail: "Recovered after a refresh. The file is stored locally and queued to continue.",
+      stageLabel: "Waiting to start",
+      detail: "Recovered after a refresh. It is saved on this device and ready to continue.",
       updatedAt: new Date().toISOString(),
     };
   });
