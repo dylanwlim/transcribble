@@ -207,13 +207,12 @@ export function useTranscribble() {
   const [transcriptQuery, setTranscriptQuery] = useState("");
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
   const [workspaceReady, setWorkspaceReady] = useState(false);
-  const [assetSetup, setAssetSetup] = useState<AssetSetupState>(() => ({
+  const [assetSetup, setAssetSetup] = useState<AssetSetupState>({
     ...DEFAULT_ASSET_STATE,
-    ...(readStoredJson<PersistedAssetState>(ASSET_STATE_KEY) ?? DEFAULT_ASSET_STATE),
     warmingModel: false,
     warmingMedia: false,
-    online: typeof navigator === "undefined" ? true : navigator.onLine,
-  }));
+    online: true,
+  });
 
   projectsRef.current = projects;
   selectedProjectIdRef.current = selectedProjectId;
@@ -318,6 +317,7 @@ export function useTranscribble() {
         project.status === "loading-model" ||
         project.status === "transcribing",
       ),
+      paused: projects.filter((project) => project.status === "paused"),
       errored: projects.filter((project) => project.status === "error"),
     }),
     [projects],
@@ -770,10 +770,12 @@ export function useTranscribble() {
 
   useEffect(() => {
     let cancelled = false;
+    const storedAssetState = readStoredJson<PersistedAssetState>(ASSET_STATE_KEY) ?? DEFAULT_ASSET_STATE;
 
     setCapabilityIssue(getLocalInferenceCapabilityIssue());
     setAssetSetup((previous) => ({
       ...previous,
+      ...storedAssetState,
       online: typeof navigator === "undefined" ? true : navigator.onLine,
     }));
 
@@ -1021,13 +1023,14 @@ export function useTranscribble() {
       }
 
       const contents = serializeProject(selectedProject, format);
+      const mimeTypes: Record<ExportFormat, string> = {
+        txt: "text/plain;charset=utf-8",
+        md: "text/markdown;charset=utf-8",
+        srt: "text/plain;charset=utf-8",
+        vtt: "text/vtt;charset=utf-8",
+      };
       const blob = new Blob([contents], {
-        type:
-          format === "txt"
-            ? "text/plain;charset=utf-8"
-            : format === "md"
-              ? "text/markdown;charset=utf-8"
-              : "text/vtt;charset=utf-8",
+        type: mimeTypes[format] ?? "text/plain;charset=utf-8",
       });
 
       const url = URL.createObjectURL(blob);
@@ -1317,7 +1320,9 @@ export function useTranscribble() {
     [applyProjectUpdate, focusedSegment, selectedProject],
   );
 
-  bookmarkShortcutRef.current = () => upsertMark("bookmark");
+  useEffect(() => {
+    bookmarkShortcutRef.current = () => upsertMark("bookmark");
+  }, [upsertMark]);
 
   const retryProject = useCallback(
     (projectId: string) => {
@@ -1335,6 +1340,40 @@ export function useTranscribble() {
       );
     },
     [applyProjectUpdate],
+  );
+
+  const cancelProject = useCallback(
+    (projectId: string) => {
+      const project = projectsRef.current.find((item) => item.id === projectId);
+      if (!project) {
+        return;
+      }
+
+      const wasActiveJob = abortActiveJob(projectId);
+
+      applyProjectUpdate(
+        projectId,
+        (current) => ({
+          ...current,
+          status: "paused",
+          progress: 0,
+          stageLabel: wasActiveJob ? "Stopped" : "Removed from queue",
+          detail: wasActiveJob
+            ? "Local processing stopped before the transcript was ready. Retry to start again."
+            : "Held out of the queue. Retry to place it back in line.",
+          error: undefined,
+        }),
+        { persist: true },
+      );
+
+      setNotice({
+        tone: "info",
+        message: wasActiveJob
+          ? `"${project.title}" was stopped before transcription finished.`
+          : `"${project.title}" was removed from the queue.`,
+      });
+    },
+    [abortActiveJob, applyProjectUpdate],
   );
 
   const removeProject = useCallback(
@@ -1362,7 +1401,7 @@ export function useTranscribble() {
       const nextProjects = projectsRef.current.filter((item) => item.id !== projectId);
       setProjects(sortProjects(nextProjects));
 
-      if (selectedProjectId === projectId) {
+      if (selectedProjectIdRef.current === projectId) {
         const fallbackProjectId = nextProjects[0]?.id ?? null;
         setSelectedProjectId(fallbackProjectId);
         persistProjectSelection(fallbackProjectId);
@@ -1374,7 +1413,7 @@ export function useTranscribble() {
         message: `"${project.title}" was removed from local storage.`,
       });
     },
-    [abortActiveJob, persistProjectSelection, selectedProjectId],
+    [abortActiveJob, persistProjectSelection],
   );
 
   const openLibrarySearchResult = useCallback(
@@ -1505,20 +1544,61 @@ export function useTranscribble() {
     [runtime, selectedProject],
   );
 
-  const mediaHandlers = {
-    onLoadedMetadata: () => {
-      if (pendingSeekRef.current !== null && mediaRef.current) {
-        mediaRef.current.currentTime = pendingSeekRef.current;
-        setCurrentTime(pendingSeekRef.current);
-        pendingSeekRef.current = null;
+  const mediaHandlers = useMemo(
+    () => ({
+      onLoadedMetadata: () => {
+        if (pendingSeekRef.current !== null && mediaRef.current) {
+          mediaRef.current.currentTime = pendingSeekRef.current;
+          setCurrentTime(pendingSeekRef.current);
+          pendingSeekRef.current = null;
+        }
+      },
+      onTimeUpdate: () => {
+        setCurrentTime(mediaRef.current?.currentTime ?? 0);
+      },
+      onPlay: () => setIsPlaying(true),
+      onPause: () => setIsPlaying(false),
+      onError: () => {
+        setNotice({
+          tone: "error",
+          message: "The browser could not play the source media file. It may be corrupted or use an unsupported codec.",
+        });
+      },
+    }),
+    [],
+  );
+
+  const assignSpeakerLabel = useCallback(
+    (turnId: string, label: string) => {
+      if (!selectedProject?.transcript) {
+        return;
       }
+
+      const trimmed = label.trim();
+      const nextTurns = selectedProject.transcript.turns.map((turn) =>
+        turn.id === turnId
+          ? {
+              ...turn,
+              speakerLabel: trimmed || undefined,
+              attribution: trimmed ? ("manual" as const) : ("pause-derived" as const),
+            }
+          : turn,
+      );
+
+      applyProjectUpdate(
+        selectedProject.id,
+        (project) => ({
+          ...project,
+          transcript: project.transcript
+            ? { ...project.transcript, turns: nextTurns }
+            : undefined,
+          detail: "Autosaved locally after speaker assignment.",
+        }),
+        { persist: true },
+      );
     },
-    onTimeUpdate: () => {
-      setCurrentTime(mediaRef.current?.currentTime ?? 0);
-    },
-    onPlay: () => setIsPlaying(true),
-    onPause: () => setIsPlaying(false),
-  };
+    [applyProjectUpdate, selectedProject],
+  );
 
   return {
     inputRef,
@@ -1577,8 +1657,10 @@ export function useTranscribble() {
     updateSelectedSegmentText,
     toggleBookmark: () => upsertMark("bookmark"),
     toggleHighlight: (color: HighlightColor) => upsertMark("highlight", color),
+    assignSpeakerLabel,
     primeTranscriptionModel,
     primeMediaRuntime,
+    cancelProject,
     retryProject,
     removeProject,
     openLibrarySearchResult,

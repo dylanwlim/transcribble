@@ -16,10 +16,18 @@ This repo now behaves more like an audio IDE than a single-use transcription wra
 - Grounded local extraction for summaries, action items, questions, dates, entities, glossary terms, and review cues
 - Multi-format export: `txt`, `md`, `srt`, `vtt`
 - Session-map timeline with chapters, pause-derived turns, marks, and search hit visibility
+- Speech density waveform visualization on the timeline
 - Tabbed inspector for selection, outline, insights, and session setup
+- Manual speaker label assignment on pause-derived turns
+- Auto-scroll to the active transcript segment during playback
+- React error boundary for crash recovery without data loss
+- IndexedDB connection recovery with automatic retry
+- Enrichment provider architecture (feature-flagged, cache-first, no paid APIs)
+- Expanded format support: `.ogg`, `.webm`, `.flac`, `.aac`
 - Safer delete handling and stronger atomic project/file persistence
 - Local setup/priming flow for the transcription model and media runtime
 - Keyboard shortcuts for transcript and library workflows
+- 63 unit tests covering transcript core, media validation, projects, and enrichment
 
 ## Product Direction
 
@@ -56,6 +64,7 @@ The transcript is treated as source material for a broader workspace:
 ### Local persistence
 
 - IndexedDB stores project metadata, source media files, and reusable workspace state
+- Automatic connection recovery with retry on `InvalidStateError` / `TransactionInactiveError`
 
 ### Deterministic intelligence layer
 
@@ -170,10 +179,13 @@ npm run build
 - [lib/transcribble/analysis.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/analysis.ts): deterministic transcript intelligence layer
 - [lib/transcribble/export.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/export.ts): `txt`/`md`/`srt`/`vtt` exports
 - [lib/transcribble/search.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/search.ts): transcript and library search
+- [lib/transcribble/enrichment.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/enrichment.ts): feature-flagged enrichment provider architecture
+- [components/error-boundary.tsx](/Users/dylan/Projects/Dev/transcribble/components/error-boundary.tsx): React error boundary for crash recovery
+- [tests/](/Users/dylan/Projects/Dev/transcribble/tests/): unit tests for transcript, media, projects, and enrichment
 
 ## Current Limitations
 
-- True speaker diarization is not implemented. The workspace now exposes explicit pause-derived turns, but it does not claim speaker identity or confidence.
+- True speaker diarization is not implemented. Manual speaker labels can be assigned to pause-derived turns, but the app does not claim automatic speaker identity or confidence.
 - Confidence scores from the model are not exposed directly; the UI shows deterministic review cues instead.
 - First-run asset download is still required before the app can operate fully offline from cache, even though the setup panel can now prime those caches proactively.
 - Very large files can still hit browser memory limits depending on hardware and browser runtime support.
@@ -182,9 +194,8 @@ npm run build
 
 Highest-leverage follow-ons after this pass:
 
-1. Add true speaker diarization using a practical local-only pipeline.
-2. Add manual speaker assignment on top of the new turn model, then layer in true local diarization when the runtime footprint is justified.
-3. Bundle model/runtime assets or ship an installable desktop shell for stricter offline guarantees.
-4. Add waveform rendering and range-based highlights on top of the new session map.
-5. Add optional cache-first public reference enrichments behind explicit feature flags.
-6. Add a semantic local index if the model/runtime footprint can be justified.
+1. Add true speaker diarization using a practical local-only pipeline to complement the manual speaker labels.
+2. Bundle model/runtime assets or ship an installable desktop shell for stricter offline guarantees.
+3. Add range-based waveform highlights tied to bookmarks and chapters.
+4. Wire enrichment providers to real free/open data sources behind the existing feature flag system.
+5. Add a semantic local index if the model/runtime footprint can be justified.
