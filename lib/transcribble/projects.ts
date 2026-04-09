@@ -8,7 +8,13 @@ import type { MediaKind, TranscriptProject } from "@/lib/transcribble/types";
 
 function inferMediaKind(file: File): MediaKind {
   const extension = getFileExtension(file.name);
-  return extension === ".mp4" || extension === ".mov" ? "video" : "audio";
+  if (extension === ".mp4" || extension === ".mov") {
+    return "video";
+  }
+  if (extension === ".webm") {
+    return file.type.startsWith("video/") ? "video" : "audio";
+  }
+  return "audio";
 }
 
 function createProjectTitle(fileName: string) {
@@ -53,7 +59,11 @@ export function recoverPersistedProjects(projects: TranscriptProject[]) {
   return projects.map((project) => {
     const normalizedProject = normalizeProject(project);
 
-    if (project.status === "ready" || project.status === "error") {
+    if (
+      project.status === "ready" ||
+      project.status === "error" ||
+      project.status === "paused"
+    ) {
       return normalizedProject;
     }
 
