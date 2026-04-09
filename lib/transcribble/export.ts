@@ -1,3 +1,4 @@
+import { getSavedRangeExcerpt } from "@/lib/transcribble/ranges";
 import { formatBytes, formatDuration } from "@/lib/transcribble/transcript";
 import type { TranscriptProject } from "@/lib/transcribble/types";
 
@@ -78,6 +79,14 @@ function buildMarkdownExport(project: TranscriptProject) {
     })
     .filter((item): item is string => Boolean(item))
     .join("\n");
+  const savedRanges = project.savedRanges
+    .map((range) => {
+      const excerpt = getSavedRangeExcerpt(range, project.transcript?.segments ?? []);
+      const noteLine = range.note ? ` — ${range.note}` : "";
+      const excerptLine = excerpt ? `\n  ${excerpt}` : "";
+      return `- ${range.label} (${formatDuration(range.start)}-${formatDuration(range.end)})${noteLine}${excerptLine}`;
+    })
+    .join("\n");
   const transcriptBody = project.transcript.segments
     .map((segment) => {
       const mark = marksBySegmentId.get(segment.id);
@@ -119,6 +128,10 @@ ${chapters || "- No chapters available"}
 ## Saved Moments
 
 ${savedMoments || "- No saved moments yet"}
+
+## Saved Ranges
+
+${savedRanges || "- No saved ranges yet"}
 
 ## Key Moments
 

@@ -1,3 +1,4 @@
+import { buildSavedRangeSearchEntries } from "@/lib/transcribble/ranges";
 import { normalizeSearchText, tokenizeText } from "@/lib/transcribble/transcript";
 import type { LibrarySearchResult, ProjectSearchEntry, TranscriptProject } from "@/lib/transcribble/types";
 
@@ -96,13 +97,33 @@ export function searchProjectLibrary(projects: TranscriptProject[], query: strin
                 projectTitle: project.title,
                 projectUpdatedAt: project.updatedAt,
                 score,
-                matchKind: "segment",
+                matchKind: entry.kind === "saved-range" ? "saved-range" : "segment",
                 entry,
               } satisfies LibrarySearchResult,
             ];
           }) ?? [];
+      const savedRangeHits = buildSavedRangeSearchEntries(project.savedRanges ?? [], project.transcript?.segments ?? []).flatMap(
+        (entry) => {
+          const score = scoreEntry(entry, normalizedQuery, queryTokens) + Math.round(titleHit / 3) + 2;
 
-      const matches = [...transcriptHits];
+          if (score <= 0) {
+            return [];
+          }
+
+          return [
+            {
+              projectId: project.id,
+              projectTitle: project.title,
+              projectUpdatedAt: project.updatedAt,
+              score,
+              matchKind: "saved-range",
+              entry,
+            } satisfies LibrarySearchResult,
+          ];
+        },
+      );
+
+      const matches = [...savedRangeHits, ...transcriptHits];
 
       if (titleEntry) {
         matches.unshift(titleEntry);

@@ -229,10 +229,10 @@ async function cleanupFFmpegFiles(ffmpeg: FFmpeg, ...files: string[]) {
 }
 
 async function extractWithFFmpeg(file: File, callbacks: PreparationCallbacks): Promise<PreparedAudio> {
-  callbacks.onStatus?.("Preparing the local media runtime...");
+  callbacks.onStatus?.("Getting video support ready in this browser...");
   const ffmpeg = await getFFmpeg(callbacks.onProgress);
 
-  callbacks.onStatus?.("Extracting an audio track in your browser...");
+  callbacks.onStatus?.("Pulling the audio out of the recording in this browser...");
   callbacks.onProgress?.(4);
 
   const { fetchFile } = await import("@ffmpeg/util");
@@ -300,7 +300,7 @@ export async function prepareAudioForTranscription(
     return extractWithFFmpeg(file, callbacks);
   }
 
-  callbacks.onStatus?.("Decoding audio locally...");
+  callbacks.onStatus?.("Reading the audio on this device...");
   callbacks.onProgress?.(12);
 
   try {
@@ -316,16 +316,16 @@ export async function prepareAudioForTranscription(
       usedFFmpeg: false,
     };
   } catch {
-    callbacks.onStatus?.("Browser decode fell back to a local media runtime...");
+    callbacks.onStatus?.("This browser needed its fallback media tools for this recording...");
     return extractWithFFmpeg(file, callbacks);
   }
 }
 
 export async function warmMediaRuntime(callbacks: PreparationCallbacks = {}) {
-  callbacks.onStatus?.("Preparing the local media runtime...");
+  callbacks.onStatus?.("Getting the browser ready for video and media fallback...");
   callbacks.onProgress?.(0);
   await getFFmpeg(callbacks.onProgress);
-  callbacks.onStatus?.("Local media runtime cached in this browser.");
+  callbacks.onStatus?.("Video support is ready in this browser.");
   callbacks.onProgress?.(100);
 }
 
@@ -346,17 +346,17 @@ export function humanizePreparationError(error: unknown) {
     const message = error.message.toLowerCase();
 
     if (message.includes("decode")) {
-      return "The browser could not decode that media file locally.";
+      return "This browser could not read that recording locally.";
     }
 
     if (message.includes("memory") || message.includes("out of memory")) {
-      return "That file exceeded available browser memory. Try a shorter or smaller clip.";
+      return "That recording used more browser memory than was available. Try a shorter or smaller file.";
     }
 
     return error.message;
   }
 
-  return `Media preparation failed. Try a smaller file under ${MAX_FILE_SIZE_LABEL} (${formatBytes(
+  return `Getting the recording ready failed. Try a smaller file under ${MAX_FILE_SIZE_LABEL} (${formatBytes(
     MAX_FILE_SIZE_BYTES,
   )}) or switch browsers.`;
 }

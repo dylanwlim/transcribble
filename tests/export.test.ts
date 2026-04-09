@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { buildTranscriptDocument } from "@/lib/transcribble/analysis";
 import { getExportFilename, serializeProject } from "@/lib/transcribble/export";
-import type { TranscriptProject, TranscriptPayload } from "@/lib/transcribble/types";
+import type { SavedRange, TranscriptProject, TranscriptPayload } from "@/lib/transcribble/types";
 
 const payload: TranscriptPayload = {
   text: "",
@@ -15,6 +15,19 @@ const payload: TranscriptPayload = {
 };
 
 function buildProject(): TranscriptProject {
+  const transcript = buildTranscriptDocument("export-project", payload, 12.9);
+  const savedRanges: SavedRange[] = [
+    {
+      id: "range-1",
+      label: "Recap deadline",
+      createdAt: new Date("2026-03-31T09:31:00Z").toISOString(),
+      start: 3.1,
+      end: 7.6,
+      segmentIds: [transcript.segments[1]?.id ?? "export-project-segment-2"],
+      note: "Includes the date callout.",
+    },
+  ];
+
   return {
     id: "export-project",
     title: "Launch Review",
@@ -32,7 +45,8 @@ function buildProject(): TranscriptProject {
     duration: 12.9,
     fileStoreKey: "export-project",
     marks: [],
-    transcript: buildTranscriptDocument("export-project", payload, 12.9),
+    savedRanges,
+    transcript,
   };
 }
 
@@ -42,6 +56,8 @@ test("markdown export includes summary and transcript timestamps", () => {
 
   assert.match(markdown, /# Launch Review/);
   assert.match(markdown, /## Summary/);
+  assert.match(markdown, /## Saved Ranges/);
+  assert.match(markdown, /Recap deadline/);
   assert.match(markdown, /\[0:00\]/);
   assert.equal(getExportFilename(project, "md"), "launch-review.md");
 });

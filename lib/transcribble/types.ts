@@ -8,6 +8,15 @@ export type ProjectStatus =
   | "ready"
   | "error";
 
+export type ProjectStep =
+  | "queued"
+  | "getting-browser-ready"
+  | "getting-recording-ready"
+  | "transcribing"
+  | "saving"
+  | "ready"
+  | "error";
+
 export type MediaKind = "audio" | "video";
 
 export type ReviewSeverity = "low" | "medium";
@@ -60,6 +69,16 @@ export interface TranscriptMark {
   label: string;
   note?: string;
   color?: HighlightColor;
+}
+
+export interface SavedRange {
+  id: string;
+  label: string;
+  createdAt: string;
+  start: number;
+  end: number;
+  segmentIds: string[];
+  note?: string;
 }
 
 export interface TranscriptChapter {
@@ -177,6 +196,8 @@ export interface ProjectSearchEntry {
   text: string;
   normalizedText: string;
   tokens: string[];
+  kind?: "segment" | "saved-range";
+  label?: string;
 }
 
 export interface TranscriptDocument {
@@ -201,6 +222,7 @@ export interface TranscriptProject {
   createdAt: string;
   updatedAt: string;
   status: ProjectStatus;
+  step?: ProjectStep;
   progress: number;
   stageLabel: string;
   detail: string;
@@ -210,9 +232,10 @@ export interface TranscriptProject {
   fileStoreKey: string;
   transcript?: TranscriptDocument;
   marks: TranscriptMark[];
+  savedRanges: SavedRange[];
 }
 
-export type LibrarySearchMatchKind = "title" | "segment";
+export type LibrarySearchMatchKind = "title" | "segment" | "saved-range";
 
 export interface LibrarySearchResult {
   projectId: string;

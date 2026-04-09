@@ -16,9 +16,17 @@ const plexMono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "Transcribble",
-  description: "Local-first audio workspace with on-device transcription, timeline editing, grounded insights, and reusable transcript memory.",
+  description: "Private voice workspace for turning recordings into searchable, editable knowledge on this device.",
+  manifest: "/manifest.webmanifest",
   icons: {
-    icon: "/icon.svg",
+    icon: "/icon",
+    apple: "/apple-icon",
+  },
+  applicationName: "Transcribble",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Transcribble",
   },
   metadataBase: new URL("https://transcribble.vercel.app"),
 };

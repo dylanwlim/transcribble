@@ -12,7 +12,6 @@ import {
 
 import { buildTranscriptDocument, updateTranscriptSegmentText } from "@/lib/transcribble/analysis";
 import {
-  LOCAL_PROCESSING_NOTE,
   MODEL_LABELS,
   RUNTIME_LABELS,
   type Runtime,
@@ -32,7 +31,18 @@ import {
   recoverPersistedProjects,
   updateProjectTimestamp,
 } from "@/lib/transcribble/projects";
+import {
+  buildSavedRangeLabel,
+  getSegmentsForRange,
+  normalizeRangeBounds,
+} from "@/lib/transcribble/ranges";
 import { searchProjectEntries, searchProjectLibrary } from "@/lib/transcribble/search";
+import { applyProjectStep } from "@/lib/transcribble/status";
+import {
+  readBrowserStorageState,
+  requestPersistentStorage,
+  type BrowserStorageState,
+} from "@/lib/transcribble/storage";
 import {
   buildReadableTranscript,
   clampTime,
@@ -42,6 +52,7 @@ import {
 import type {
   HighlightColor,
   LibrarySearchResult,
+  SavedRange,
   TranscriptChunk,
   TranscriptDocument,
   TranscriptMark,
@@ -116,6 +127,20 @@ interface AssetSetupState extends PersistedAssetState {
   warmingMedia: boolean;
   online: boolean;
   lastError?: string;
+}
+
+interface InstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{
+    outcome: "accepted" | "dismissed";
+    platform: string;
+  }>;
+}
+
+interface InstallState {
+  shellReady: boolean;
+  installPromptAvailable: boolean;
+  installed: boolean;
 }
 
 interface SetupJob {
@@ -214,6 +239,13 @@ export function useTranscribble() {
     warmingMedia: false,
     online: typeof navigator === "undefined" ? true : navigator.onLine,
   }));
+  const [storageState, setStorageState] = useState<BrowserStorageState | null>(null);
+  const [installState, setInstallState] = useState<InstallState>({
+    shellReady: false,
+    installPromptAvailable: false,
+    installed: false,
+  });
+  const installPromptRef = useRef<InstallPromptEvent | null>(null);
 
   projectsRef.current = projects;
   selectedProjectIdRef.current = selectedProjectId;
@@ -327,6 +359,10 @@ export function useTranscribble() {
     () => selectedProject?.marks ?? [],
     [selectedProject],
   );
+  const currentProjectRanges = useMemo(
+    () => (selectedProject?.savedRanges ?? []).toSorted((left, right) => left.start - right.start),
+    [selectedProject],
+  );
   const selectedFileStoreKey = selectedProject?.fileStoreKey ?? null;
 
   const isBusy =
@@ -411,14 +447,14 @@ export function useTranscribble() {
     (projectId: string, message: string) => {
       applyProjectUpdate(
         projectId,
-        (project) => ({
-          ...project,
-          status: "error",
-          progress: 0,
-          stageLabel: "Error",
-          detail: message,
-          error: message,
-        }),
+        (project) =>
+          applyProjectStep(project, {
+            status: "error",
+            step: "error",
+            progress: 0,
+            detail: message,
+            error: message,
+          }),
         { persist: true },
       );
       setNotice({
@@ -457,14 +493,14 @@ export function useTranscribble() {
         if (projectId) {
           applyProjectUpdate(
             projectId,
-            (project) => ({
-              ...project,
-              status: "loading-model",
-              progress: Math.max(project.progress, 18),
-              stageLabel: "Loading model",
-              detail: payload.data ?? LOCAL_PROCESSING_NOTE,
-              runtime: payload.device,
-            }),
+            (project) =>
+              applyProjectStep(project, {
+                status: "loading-model",
+                step: "getting-browser-ready",
+                progress: Math.max(project.progress, 18),
+                detail: payload.data ?? "Downloading the one-time local tools this browser needs.",
+                runtime: payload.device,
+              }),
           );
         }
         break;
@@ -501,12 +537,14 @@ export function useTranscribble() {
         }
 
         if (projectId) {
-          applyProjectUpdate(projectId, (project) => ({
-            ...project,
-            progress: Math.max(project.progress, Math.round(((payload.progress ?? 0) / 100) * 32) + 26),
-            stageLabel: "Downloading runtime",
-            detail: project.detail,
-          }));
+          applyProjectUpdate(projectId, (project) =>
+            applyProjectStep(project, {
+              status: "loading-model",
+              step: "getting-browser-ready",
+              progress: Math.max(project.progress, Math.round(((payload.progress ?? 0) / 100) * 32) + 26),
+              detail: "Downloading the one-time local tools this browser needs.",
+            }),
+          );
         }
         break;
 
@@ -516,10 +554,13 @@ export function useTranscribble() {
         }
 
         if (projectId) {
-          applyProjectUpdate(projectId, (project) => ({
-            ...project,
-            progress: Math.max(project.progress, 58),
-          }));
+          applyProjectUpdate(projectId, (project) =>
+            applyProjectStep(project, {
+              status: "loading-model",
+              step: "getting-browser-ready",
+              progress: Math.max(project.progress, 58),
+            }),
+          );
         }
         break;
 
@@ -527,14 +568,15 @@ export function useTranscribble() {
         markModelPrimed(payload.device);
 
         if (projectId) {
-          applyProjectUpdate(projectId, (project) => ({
-            ...project,
-            status: "loading-model",
-            progress: Math.max(project.progress, 60),
-            stageLabel: "Model ready",
-            detail: "Local model is ready. Finishing media preparation before decoding speech.",
-            runtime: payload.device,
-          }));
+          applyProjectUpdate(projectId, (project) =>
+            applyProjectStep(project, {
+              status: "preparing",
+              step: "getting-recording-ready",
+              progress: Math.max(project.progress, 60),
+              detail: "The browser is ready. Finishing the recording setup now.",
+              runtime: payload.device,
+            }),
+          );
         } else {
           setAssetProgressItems([]);
           resolveSetupJob();
@@ -551,11 +593,12 @@ export function useTranscribble() {
         if (projectId) {
           applyProjectUpdate(
             projectId,
-            (project) => ({
-              ...project,
-              runtime: "wasm",
-              detail: payload.data ?? "Fell back to a WebAssembly runtime for local processing.",
-            }),
+            (project) =>
+              applyProjectStep(project, {
+                step: project.step ?? "getting-browser-ready",
+                runtime: "wasm",
+                detail: payload.data ?? "This browser fell back to a slower local runtime.",
+              }),
             { persist: true },
           );
         }
@@ -573,17 +616,18 @@ export function useTranscribble() {
           });
         }
 
-        applyProjectUpdate(projectId, (project) => ({
-          ...project,
-          status: "transcribing",
-          progress: Math.max(project.progress, Math.round(((payload.progress ?? 0) / 100) * 34) + 60),
-          stageLabel: "Transcribing",
-          detail:
-            payload.device === "webgpu"
-              ? "Running local transcription with GPU acceleration."
-              : "Running local transcription with a CPU fallback.",
-          runtime: payload.device,
-        }));
+        applyProjectUpdate(projectId, (project) =>
+          applyProjectStep(project, {
+            status: "transcribing",
+            step: "transcribing",
+            progress: Math.max(project.progress, Math.round(((payload.progress ?? 0) / 100) * 34) + 60),
+            detail:
+              payload.device === "webgpu"
+                ? "Listening on this device with browser GPU help."
+                : "Listening on this device with the browser's slower local runtime.",
+            runtime: payload.device,
+          }),
+        );
         break;
 
       case "complete":
@@ -605,17 +649,17 @@ export function useTranscribble() {
 
           applyProjectUpdate(
             projectId,
-            (project) => ({
-              ...project,
-              status: "ready",
-              progress: 100,
-              stageLabel: "Ready",
-              detail: "Saved locally. Search, edit, export, and reopen this workspace anytime.",
-              error: undefined,
-              duration: activeJob.duration,
-              runtime: payload.device,
-              transcript: document,
-            }),
+            (project) =>
+              applyProjectStep(project, {
+                status: "ready",
+                step: "ready",
+                progress: 100,
+                detail: "Saved on this device. You can search, edit, and export it any time.",
+                error: undefined,
+                duration: activeJob.duration,
+                runtime: payload.device,
+                transcript: document,
+              }),
             { persist: true, select: !selectedProjectIdRef.current },
           );
         }
@@ -675,14 +719,14 @@ export function useTranscribble() {
 
       applyProjectUpdate(
         project.id,
-        (current) => ({
-          ...current,
-          status: "preparing",
-          progress: 8,
-          stageLabel: "Preparing media",
-          detail: "Reading the local media file and preparing audio for transcription.",
-          error: undefined,
-        }),
+        (current) =>
+          applyProjectStep(current, {
+            status: "preparing",
+            step: "getting-recording-ready",
+            progress: 8,
+            detail: "Reading the file and getting the audio ready on this device.",
+            error: undefined,
+          }),
         { persist: true },
       );
 
@@ -700,13 +744,14 @@ export function useTranscribble() {
               return;
             }
 
-            applyProjectUpdate(project.id, (current) => ({
-              ...current,
-              status: "preparing",
-              progress: Math.max(current.progress, 14),
-              stageLabel: "Preparing media",
-              detail,
-            }));
+            applyProjectUpdate(project.id, (current) =>
+              applyProjectStep(current, {
+                status: "preparing",
+                step: "getting-recording-ready",
+                progress: Math.max(current.progress, 14),
+                detail,
+              }),
+            );
           },
           onProgress: (progress) => {
             if (activeJobRef.current?.jobId !== jobId || progress === null) {
@@ -736,14 +781,14 @@ export function useTranscribble() {
 
         applyProjectUpdate(
           project.id,
-          (current) => ({
-            ...current,
-            status: "transcribing",
-            progress: Math.max(current.progress, 60),
-            stageLabel: "Transcribing",
-            detail: "Decoding speech locally. Large files can take time on slower hardware.",
-            duration: prepared.duration,
-          }),
+          (current) =>
+            applyProjectStep(current, {
+              status: "transcribing",
+              step: "transcribing",
+              progress: Math.max(current.progress, 60),
+              detail: "Transcribing on this device. Longer recordings can take a while on slower hardware.",
+              duration: prepared.duration,
+            }),
           { persist: true },
         );
 
@@ -783,6 +828,37 @@ export function useTranscribble() {
       }
     });
 
+    void readBrowserStorageState().then((state) => {
+      if (!cancelled) {
+        setStorageState(state);
+      }
+    });
+
+    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+      void navigator.serviceWorker
+        .register("/sw.js")
+        .then(() => {
+          if (!cancelled) {
+            setInstallState((previous) => ({
+              ...previous,
+              shellReady: true,
+              installed:
+                previous.installed ||
+                window.matchMedia("(display-mode: standalone)").matches ||
+                (window.navigator as Navigator & { standalone?: boolean }).standalone === true,
+            }));
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setInstallState((previous) => ({
+              ...previous,
+              shellReady: false,
+            }));
+          }
+        });
+    }
+
     void (async () => {
       const storedProjects = await listProjects();
       if (cancelled) {
@@ -814,9 +890,29 @@ export function useTranscribble() {
       }));
     };
 
+    const onBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      installPromptRef.current = event as InstallPromptEvent;
+      setInstallState((previous) => ({
+        ...previous,
+        installPromptAvailable: true,
+      }));
+    };
+
+    const onInstalled = () => {
+      installPromptRef.current = null;
+      setInstallState((previous) => ({
+        ...previous,
+        installed: true,
+        installPromptAvailable: false,
+      }));
+    };
+
     if (typeof window !== "undefined") {
       window.addEventListener("online", syncOnlineState);
       window.addEventListener("offline", syncOnlineState);
+      window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+      window.addEventListener("appinstalled", onInstalled);
     }
 
     return () => {
@@ -824,6 +920,8 @@ export function useTranscribble() {
       if (typeof window !== "undefined") {
         window.removeEventListener("online", syncOnlineState);
         window.removeEventListener("offline", syncOnlineState);
+        window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+        window.removeEventListener("appinstalled", onInstalled);
       }
       workerRef.current?.terminate();
       workerRef.current = null;
@@ -1226,7 +1324,7 @@ export function useTranscribble() {
           ...project,
           marks: nextMarks,
           transcript: nextDocument,
-          detail: "Autosaved locally after transcript edit.",
+          detail: "Saved on this device after your edit.",
         }),
         { persist: true },
       );
@@ -1250,7 +1348,7 @@ export function useTranscribble() {
         (project) => ({
           ...project,
           title: trimmed,
-          detail: "Autosaved locally.",
+          detail: "Saved on this device.",
         }),
         { persist: true },
       );
@@ -1309,12 +1407,93 @@ export function useTranscribble() {
           ...project,
           marks: nextMarks,
           transcript: nextDocument,
-          detail: "Autosaved locally.",
+          detail: "Saved on this device.",
         }),
         { persist: true },
       );
     },
     [applyProjectUpdate, focusedSegment, selectedProject],
+  );
+
+  const saveRange = useCallback(
+    (range: {
+      start: number;
+      end: number;
+      label?: string;
+      note?: string;
+    }) => {
+      if (!selectedProject || !selectedProject.transcript) {
+        return;
+      }
+
+      const bounds = normalizeRangeBounds(range.start, range.end);
+      const segments = getSegmentsForRange(selectedProject.transcript.segments, bounds.start, bounds.end);
+
+      if (segments.length === 0) {
+        setNotice({
+          tone: "error",
+          message: "Pick a time range that overlaps the transcript before saving it.",
+        });
+        return;
+      }
+
+      const trimmedLabel = range.label?.trim();
+      const trimmedNote = range.note?.trim();
+      const nextRange: SavedRange = {
+        id: crypto.randomUUID(),
+        label: trimmedLabel || buildSavedRangeLabel(segments.map((segment) => segment.text).join(" ")),
+        createdAt: new Date().toISOString(),
+        start: bounds.start,
+        end: bounds.end,
+        segmentIds: segments.map((segment) => segment.id),
+        note: trimmedNote || undefined,
+      };
+
+      applyProjectUpdate(
+        selectedProject.id,
+        (project) => ({
+          ...project,
+          savedRanges: [...project.savedRanges, nextRange].toSorted((left, right) => left.start - right.start),
+          detail: "Saved on this device for later review.",
+        }),
+        { persist: true },
+      );
+
+      setNotice({
+        tone: "info",
+        message: `"${nextRange.label}" is saved on this device.`,
+      });
+    },
+    [applyProjectUpdate, selectedProject],
+  );
+
+  const removeSavedRange = useCallback(
+    (rangeId: string) => {
+      if (!selectedProject) {
+        return;
+      }
+
+      const targetRange = selectedProject.savedRanges.find((range) => range.id === rangeId);
+      if (!targetRange) {
+        return;
+      }
+
+      applyProjectUpdate(
+        selectedProject.id,
+        (project) => ({
+          ...project,
+          savedRanges: project.savedRanges.filter((range) => range.id !== rangeId),
+          detail: "Saved on this device.",
+        }),
+        { persist: true },
+      );
+
+      setNotice({
+        tone: "info",
+        message: `"${targetRange.label}" was removed from this device.`,
+      });
+    },
+    [applyProjectUpdate, selectedProject],
   );
 
   bookmarkShortcutRef.current = () => upsertMark("bookmark");
@@ -1323,14 +1502,14 @@ export function useTranscribble() {
     (projectId: string) => {
       applyProjectUpdate(
         projectId,
-        (project) => ({
-          ...project,
-          status: "queued",
-          progress: 0,
-          stageLabel: "Queued",
-          detail: "Queued to retry local transcription.",
-          error: undefined,
-        }),
+        (project) =>
+          applyProjectStep(project, {
+            status: "queued",
+            step: "queued",
+            progress: 0,
+            detail: "Saved on this device and queued to try again.",
+            error: undefined,
+          }),
         { persist: true, select: true },
       );
     },
@@ -1349,8 +1528,8 @@ export function useTranscribble() {
           ? true
           : window.confirm(
               project.status === "transcribing" || project.status === "preparing" || project.status === "loading-model"
-                ? `Delete "${project.title}" and stop its local transcription job? This will remove the saved media and transcript state from this browser.`
-                : `Delete "${project.title}" from this browser? This removes the saved media, transcript, and workspace state.`,
+                ? `Remove "${project.title}" from this browser and stop working on it now? This deletes the saved recording and transcript data from this device.`
+                : `Remove "${project.title}" from this browser? This deletes the saved recording, transcript, and workspace data from this device.`,
             );
 
       if (!shouldRemove) {
@@ -1371,7 +1550,7 @@ export function useTranscribble() {
       await deleteProjectRecord(project);
       setNotice({
         tone: "info",
-        message: `"${project.title}" was removed from local storage.`,
+        message: `"${project.title}" was removed from this device.`,
       });
     },
     [abortActiveJob, persistProjectSelection, selectedProjectId],
@@ -1380,7 +1559,7 @@ export function useTranscribble() {
   const openLibrarySearchResult = useCallback(
     (result: LibrarySearchResult) => {
       selectProject(result.projectId);
-      if (result.matchKind === "segment" && result.entry.segmentId) {
+      if ((result.matchKind === "segment" || result.matchKind === "saved-range") && result.entry.segmentId) {
         setActiveSegmentId(result.entry.segmentId);
         seekToTime(result.entry.start);
       }
@@ -1420,10 +1599,10 @@ export function useTranscribble() {
       await ready;
       setNotice({
         tone: "info",
-        message: "The local transcription model is warmed and ready for reuse in this browser profile.",
+        message: "This browser is ready to transcribe locally.",
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to warm the local transcription model.";
+      const message = error instanceof Error ? error.message : "This browser could not finish setup for local transcription.";
       setNotice({
         tone: "error",
         message,
@@ -1464,7 +1643,7 @@ export function useTranscribble() {
       setAssetProgressItems([]);
       setNotice({
         tone: "info",
-        message: "The local media runtime is cached for video extraction and offline fallback in this browser profile.",
+        message: "This browser is ready to open video imports and local fallback media processing.",
       });
     } catch (error) {
       const message = humanizePreparationError(error);
@@ -1481,6 +1660,58 @@ export function useTranscribble() {
     }
   }, [assetSetup.warmingMedia, markMediaPrimed, queuedProjects.length]);
 
+  const refreshStorageState = useCallback(async () => {
+    const nextState = await readBrowserStorageState();
+    setStorageState(nextState);
+    return nextState;
+  }, []);
+
+  const askForPersistentStorage = useCallback(async () => {
+    const granted = await requestPersistentStorage();
+    const nextState = await refreshStorageState();
+
+    setNotice({
+      tone: granted ? "info" : "error",
+      message:
+        granted || nextState.persisted
+          ? "This browser agreed to keep Transcribble's local storage around more reliably."
+          : "This browser did not confirm protected storage. Your work still stays local, but large files may be easier for the browser to clear.",
+    });
+  }, [refreshStorageState]);
+
+  const resetSetupState = useCallback(() => {
+    setAssetSetup((previous) => ({
+      ...previous,
+      modelReady: false,
+      mediaReady: false,
+      modelPrimedAt: undefined,
+      mediaPrimedAt: undefined,
+      lastError: undefined,
+    }));
+    setAssetProgressItems([]);
+    setNotice({
+      tone: "info",
+      message: "Saved setup status was reset. Your projects were left alone.",
+    });
+  }, []);
+
+  const promptInstall = useCallback(async () => {
+    const promptEvent = installPromptRef.current;
+    if (!promptEvent) {
+      return;
+    }
+
+    await promptEvent.prompt();
+    const result = await promptEvent.userChoice;
+
+    installPromptRef.current = null;
+    setInstallState((previous) => ({
+      ...previous,
+      installPromptAvailable: false,
+      installed: result.outcome === "accepted" ? true : previous.installed,
+    }));
+  }, []);
+
   const currentFileMeta = useMemo(
     () =>
       selectedProject
@@ -1490,14 +1721,14 @@ export function useTranscribble() {
               ? formatDuration(selectedProject.transcript.stats.duration)
               : selectedProject.duration
                 ? formatDuration(selectedProject.duration)
-                : "Not ready yet",
-            runtimeLabel: selectedProject.runtime ? RUNTIME_LABELS[selectedProject.runtime] : "Waiting for runtime",
+                : "Checking length",
+            runtimeLabel: selectedProject.runtime ? RUNTIME_LABELS[selectedProject.runtime] : "Browser setup pending",
             modelLabel: selectedProject.runtime ? MODEL_LABELS[selectedProject.runtime] : "Whisper base timestamped",
             fileSizeLabel: formatBytes(selectedProject.sourceSize),
           }
         : {
             fileMeta: "No project selected",
-            durationLabel: "Not ready yet",
+            durationLabel: "No recording yet",
             runtimeLabel: RUNTIME_LABELS[runtime],
             modelLabel: MODEL_LABELS[runtime],
             fileSizeLabel: "0 B",
@@ -1535,6 +1766,7 @@ export function useTranscribble() {
     currentTime,
     isPlaying,
     currentProjectMarks,
+    currentProjectRanges,
     focusedSegment,
     focusedSegmentId,
     playbackSegmentId,
@@ -1546,6 +1778,8 @@ export function useTranscribble() {
     capabilityIssue,
     runtime,
     assetSetup,
+    storageState,
+    installState,
     dragActive,
     copied,
     notice,
@@ -1577,8 +1811,14 @@ export function useTranscribble() {
     updateSelectedSegmentText,
     toggleBookmark: () => upsertMark("bookmark"),
     toggleHighlight: (color: HighlightColor) => upsertMark("highlight", color),
+    saveRange,
+    removeSavedRange,
     primeTranscriptionModel,
     primeMediaRuntime,
+    askForPersistentStorage,
+    refreshStorageState,
+    resetSetupState,
+    promptInstall,
     retryProject,
     removeProject,
     openLibrarySearchResult,
