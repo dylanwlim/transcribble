@@ -26,7 +26,7 @@ It is not a chatbot shell and it is not a hosted transcription dashboard. The co
 
 ## First-Time Setup And Offline Caveat
 
-Transcribble does local processing, but a brand-new browser profile still needs one online setup before strict offline reuse works.
+Transcribble does local processing, but a brand-new browser profile still needs one online setup before fully local repeat use works.
 
 On first setup the browser downloads:
 
@@ -35,7 +35,7 @@ On first setup the browser downloads:
 
 After those are cached, normal use can stay local in that browser profile.
 
-Important caveat:
+Important note:
 
 - This app does not claim true first-run offline support from a cold browser profile
 - If the browser has never downloaded the local assets before, internet is still required once
@@ -54,7 +54,7 @@ The app also surfaces:
 - whether the browser reports durable storage protection
 - storage usage and quota when the browser exposes it
 - whether larger recordings can use the private file system
-- browser caveats that affect local reliability
+- browser notes that affect local reliability
 
 ## Installability
 
@@ -62,10 +62,10 @@ This repo now includes a basic installable web-app foundation:
 
 - web manifest
 - generated app icons
-- a lightweight service worker for the app shell
+- a lightweight service worker for quicker reopen support
 - install prompt wiring when the browser exposes it
 
-This improves reopenability and app-like launch behavior, but it does not change the first-run offline caveat above.
+This improves reopenability and app-like launch behavior, but it does not change the first-run offline note above.
 
 ## Core Review Workflow
 

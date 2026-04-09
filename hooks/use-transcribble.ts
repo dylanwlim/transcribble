@@ -199,6 +199,20 @@ function makeMarkLabel(segment: TranscriptSegment, kind: TranscriptMark["kind"])
   return `${prefix} · ${segment.text.slice(0, 48).trim()}${segment.text.length > 48 ? "…" : ""}`;
 }
 
+function toProjectFailureSummary(message: string) {
+  const lower = message.toLowerCase();
+
+  if (lower.includes("could not be found in local storage")) {
+    return "Transcribble could not reopen the saved recording in this browser. The session is still listed here, but it needs the original file to continue.";
+  }
+
+  if (lower.includes("out of memory") || lower.includes("memory")) {
+    return "This recording was too large for the browser memory that was available. The recording is still saved on this device, and you can try again with a shorter file or a desktop browser.";
+  }
+
+  return `${message} The recording is still saved on this device, and you can try again when you're ready.`;
+}
+
 export function useTranscribble() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const mediaRef = useRef<HTMLAudioElement | HTMLVideoElement | null>(null);
@@ -445,6 +459,8 @@ export function useTranscribble() {
 
   const finishProjectWithError = useCallback(
     (projectId: string, message: string) => {
+      const failureSummary = toProjectFailureSummary(message);
+
       applyProjectUpdate(
         projectId,
         (project) =>
@@ -452,14 +468,14 @@ export function useTranscribble() {
             status: "error",
             step: "error",
             progress: 0,
-            detail: message,
+            detail: failureSummary,
             error: message,
           }),
         { persist: true },
       );
       setNotice({
         tone: "error",
-        message,
+        message: failureSummary,
       });
       finishJob();
     },
@@ -597,7 +613,7 @@ export function useTranscribble() {
               applyProjectStep(project, {
                 step: project.step ?? "getting-browser-ready",
                 runtime: "wasm",
-                detail: payload.data ?? "This browser fell back to a slower local runtime.",
+                detail: payload.data ?? "This browser switched to a slower local mode.",
               }),
             { persist: true },
           );
@@ -624,7 +640,7 @@ export function useTranscribble() {
             detail:
               payload.device === "webgpu"
                 ? "Listening on this device with browser GPU help."
-                : "Listening on this device with the browser's slower local runtime.",
+                : "Listening on this device in a slower local mode.",
             runtime: payload.device,
           }),
         );
@@ -1599,10 +1615,10 @@ export function useTranscribble() {
       await ready;
       setNotice({
         tone: "info",
-        message: "This browser is ready to transcribe locally.",
+        message: "This browser is ready to transcribe recordings.",
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "This browser could not finish setup for local transcription.";
+      const message = error instanceof Error ? error.message : "This browser could not finish its one-time transcription setup.";
       setNotice({
         tone: "error",
         message,
@@ -1643,7 +1659,7 @@ export function useTranscribble() {
       setAssetProgressItems([]);
       setNotice({
         tone: "info",
-        message: "This browser is ready to open video imports and local fallback media processing.",
+        message: "This browser is ready to open video recordings and handle fallback media work.",
       });
     } catch (error) {
       const message = humanizePreparationError(error);
@@ -1674,8 +1690,8 @@ export function useTranscribble() {
       tone: granted ? "info" : "error",
       message:
         granted || nextState.persisted
-          ? "This browser agreed to keep Transcribble's local storage around more reliably."
-          : "This browser did not confirm protected storage. Your work still stays local, but large files may be easier for the browser to clear.",
+          ? "This browser agreed to help keep Transcribble's local files available."
+          : "This browser did not confirm extra protection for local files. Your work still stays here, but the browser may clear large files more aggressively.",
     });
   }, [refreshStorageState]);
 
@@ -1691,7 +1707,7 @@ export function useTranscribble() {
     setAssetProgressItems([]);
     setNotice({
       tone: "info",
-      message: "Saved setup status was reset. Your projects were left alone.",
+      message: "Saved setup status was reset. Your recordings and projects were left alone.",
     });
   }, []);
 
@@ -1721,8 +1737,20 @@ export function useTranscribble() {
               ? formatDuration(selectedProject.transcript.stats.duration)
               : selectedProject.duration
                 ? formatDuration(selectedProject.duration)
-                : "Checking length",
-            runtimeLabel: selectedProject.runtime ? RUNTIME_LABELS[selectedProject.runtime] : "Browser setup pending",
+                : selectedProject.status === "error"
+                  ? "Unavailable"
+                  : selectedProject.status === "queued"
+                    ? "Waiting to start"
+                    : selectedProject.step === "getting-browser-ready"
+                      ? "Waiting for browser setup"
+                      : selectedProject.step === "transcribing"
+                        ? "Transcribing"
+                        : "Getting ready",
+            runtimeLabel: selectedProject.runtime
+              ? RUNTIME_LABELS[selectedProject.runtime]
+              : selectedProject.status === "error"
+                ? "Didn't start"
+                : "Starting local tools",
             modelLabel: selectedProject.runtime ? MODEL_LABELS[selectedProject.runtime] : "Whisper base timestamped",
             fileSizeLabel: formatBytes(selectedProject.sourceSize),
           }

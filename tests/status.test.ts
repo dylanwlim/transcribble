@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { applyProjectStep, getDefaultProjectStep, getProjectStatusCopy } from "@/lib/transcribble/status";
+import { applyProjectStep, getDefaultProjectStep, getProjectStatusCopy, getProjectViewState } from "@/lib/transcribble/status";
 import type { TranscriptProject } from "@/lib/transcribble/types";
 
 function buildProject(): TranscriptProject {
@@ -24,6 +24,49 @@ function buildProject(): TranscriptProject {
     fileStoreKey: "status-project",
     marks: [],
     savedRanges: [],
+  };
+}
+
+function buildReadyProject(): TranscriptProject {
+  return {
+    ...buildProject(),
+    status: "ready",
+    step: "ready",
+    progress: 100,
+    stageLabel: "Ready to review",
+    detail: "Saved on this device. Search, edit, and export whenever you need it.",
+    transcript: {
+      plainText: "hello world",
+      chunks: [],
+      segments: [],
+      turns: [],
+      chapters: [],
+      insights: {
+        summary: [],
+        actions: [],
+        questions: [],
+        dates: [],
+        entities: [],
+        glossary: [],
+        keyMoments: [],
+        reviewCues: [],
+      },
+      stats: {
+        duration: 12,
+        wordCount: 2,
+        characterCount: 11,
+        segmentCount: 0,
+        turnCount: 0,
+        questionCount: 0,
+        actionCount: 0,
+        reviewCount: 0,
+        bookmarkCount: 0,
+        highlightCount: 0,
+        speakingRateWpm: 0,
+      },
+      searchEntries: [],
+      generatedAt: new Date("2026-03-31T09:01:00Z").toISOString(),
+    },
   };
 }
 
@@ -58,4 +101,33 @@ test("applyProjectStep keeps the headline and step in sync", () => {
   assert.equal(nextProject.step, "transcribing");
   assert.equal(nextProject.stageLabel, "Transcribing now");
   assert.match(nextProject.detail, /listening on this device/i);
+});
+
+test("getProjectViewState enables transcript controls only when the transcript is ready", () => {
+  const view = getProjectViewState(buildReadyProject());
+
+  assert.equal(view.canUseTranscript, true);
+  assert.equal(view.canSearchTranscript, true);
+  assert.equal(view.canExport, true);
+  assert.equal(view.canSaveRanges, true);
+  assert.equal(view.transcriptBadgeLabel, "Transcript ready");
+});
+
+test("getProjectViewState keeps failed sessions calm and non-optimistic", () => {
+  const view = getProjectViewState({
+    ...buildProject(),
+    status: "error",
+    step: "error",
+    detail: "Transcribble could not reopen the saved recording. The recording is still saved on this device, and you can try again when you're ready.",
+    error: "ENOENT: source file missing",
+  });
+
+  assert.equal(view.canUseTranscript, false);
+  assert.equal(view.canSearchTranscript, false);
+  assert.equal(view.canExport, false);
+  assert.equal(view.canSaveRanges, false);
+  assert.equal(view.statusLabel, "Problem");
+  assert.equal(view.transcriptEmptyTitle, "This recording could not finish yet");
+  assert.match(view.transcriptEmptyBody, /still saved on this device/i);
+  assert.doesNotMatch(view.transcriptEmptyBody, /ENOENT/);
 });

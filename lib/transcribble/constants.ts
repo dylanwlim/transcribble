@@ -17,8 +17,8 @@ export type Runtime = "webgpu" | "wasm";
 export const MODEL_ID = "onnx-community/whisper-base_timestamped";
 
 export const RUNTIME_LABELS: Record<Runtime, string> = {
-  webgpu: "Faster local browser runtime",
-  wasm: "Standard local browser runtime",
+  webgpu: "Fast local mode",
+  wasm: "Standard local mode",
 };
 
 export const MODEL_LABELS: Record<Runtime, string> = {

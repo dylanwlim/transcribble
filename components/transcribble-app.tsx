@@ -8,7 +8,6 @@ import {
   Calendar,
   CheckCircle2,
   Copy,
-  Cpu,
   Download,
   FileAudio,
   FileText,
@@ -35,7 +34,7 @@ import { Progress } from "@/components/ui/progress";
 import { useTranscribble } from "@/hooks/use-transcribble";
 import { APP_NAME, MAX_FILE_SIZE_LABEL } from "@/lib/transcribble/constants";
 import type { ExportFormat } from "@/lib/transcribble/export";
-import { getProjectStatusCopy } from "@/lib/transcribble/status";
+import { getProjectStatusCopy, getProjectViewState } from "@/lib/transcribble/status";
 import { formatBytes, formatDuration } from "@/lib/transcribble/transcript";
 import type {
   HighlightColor,
@@ -196,14 +195,8 @@ export function TranscribbleApp() {
   const setupReady = assetSetup.modelReady && assetSetup.mediaReady;
   const effectiveOnline = workspaceReady ? assetSetup.online : true;
   const selectedProjectStatus = selectedProject ? getProjectStatusCopy(selectedProject) : null;
+  const selectedProjectView = selectedProject ? getProjectViewState(selectedProject) : null;
   const queuedCount = queuedProjects.length;
-  const workingProjectCount = useMemo(
-    () =>
-      projectGroups.active.filter(
-        (item) => item.status === "preparing" || item.status === "loading-model" || item.status === "transcribing",
-      ).length,
-    [projectGroups.active],
-  );
   const supportedFormatsLabel = useMemo(
     () =>
       accept
@@ -213,25 +206,24 @@ export function TranscribbleApp() {
     [accept],
   );
   const setupSummary = setupReady
-    ? "This browser is ready for offline reuse after the first setup."
+    ? "This browser is ready to open recordings, transcribe them, and keep the results here."
     : effectiveOnline
-      ? "The first setup downloads the local tools this browser needs, then later work stays on this device."
-      : "Go online once to finish the first setup for this browser.";
-  const setupBreakdownLabel = `${assetSetup.modelReady ? "Transcription ready" : "Transcription setup needed"} • ${
-    assetSetup.mediaReady ? "Video support ready" : "Video setup needed"
-  }`;
-  const storageUsageLabel = storageState?.usage && storageState.quota
-    ? `${formatBytes(storageState.usage)} used of ${formatBytes(storageState.quota)}`
-    : "Storage use not reported by this browser";
+      ? "The first setup downloads the local tools this browser needs. After that, your work stays here."
+      : "Go online once so this browser can finish its one-time setup.";
+  const setupBreakdownLabel = assetSetup.modelReady && assetSetup.mediaReady
+    ? "Transcription and video are ready."
+    : assetSetup.modelReady
+      ? "Transcription is ready. Video still needs setup."
+      : assetSetup.mediaReady
+        ? "Video is ready. Transcription still needs setup."
+        : "Transcription and video still need setup.";
   const storageProtectionLabel =
     storageState?.persisted === true
-      ? "Protected from browser cleanup"
+      ? "Browser says these local files are less likely to be cleared"
       : storageState?.persisted === false
-        ? "Can still be cleared by the browser"
-        : "Protection not reported";
-  const storageModeLabel = storageState?.opfsSupported
-    ? "Large recordings can move into the browser's private file system."
-    : "Recordings stay in IndexedDB in this browser.";
+        ? "Browser may still clear local files if storage gets tight"
+        : "This browser does not report extra local-file protection";
+  const browserNote = storageState?.caveats[0] ?? null;
   const rangeBounds = useMemo(
     () =>
       rangeStart === null || rangeEnd === null
@@ -243,7 +235,22 @@ export function TranscribbleApp() {
     () => (rangeBounds ? transcriptSegments.filter((segment) => segment.end >= rangeBounds.start && segment.start <= rangeBounds.end) : []),
     [rangeBounds, transcriptSegments],
   );
-  const canSaveRange = Boolean(selectedProject?.transcript && rangeBounds && rangeDraftSegments.length > 0);
+  const canSaveRange = Boolean(selectedProjectView?.canSaveRanges && rangeBounds && rangeDraftSegments.length > 0);
+  const showLibrary = !emptyState;
+  const showInspector = Boolean(selectedProjectView?.canUseTranscript && selectedProject?.status === "ready");
+  const showExportActions = Boolean(selectedProjectView?.canExport);
+  const showTranscriptSearch = Boolean(selectedProjectView?.canSearchTranscript);
+  const showReviewComposer = Boolean(selectedProjectView?.canSaveRanges);
+  const showErrorActions = selectedProjectView?.step === "error";
+  const showTimelineOverview = Boolean(
+    (selectedProjectStats?.duration ?? selectedProject?.duration ?? 0) > 0 ||
+      transcriptSegments.length > 0 ||
+      currentProjectRanges.length > 0 ||
+      currentProjectMarks.length > 0,
+  );
+  const showMediaPanel = Boolean(mediaUrl);
+  const setupActionDisabled =
+    assetSetup.warmingModel || assetSetup.warmingMedia || queuedCount > 0 || !effectiveOnline;
 
   const primeWorkspaceSetup = async () => {
     if (!assetSetup.modelReady) {
@@ -338,12 +345,13 @@ export function TranscribbleApp() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                <HeaderPill icon={ShieldCheck} label="Saved on this device" tone="success" />
-                <HeaderPill
-                  icon={effectiveOnline ? CheckCircle2 : AlertTriangle}
-                  label={setupReady ? "Browser ready" : effectiveOnline ? "Finish first setup" : "Setup needs internet"}
-                  tone={setupReady ? "success" : effectiveOnline ? "default" : "warning"}
-                />
+                {!setupReady ? (
+                  <HeaderPill
+                    icon={effectiveOnline ? CheckCircle2 : AlertTriangle}
+                    label={effectiveOnline ? "Finish browser setup" : "Setup needs internet"}
+                    tone={effectiveOnline ? "default" : "warning"}
+                  />
+                ) : null}
                 {queuedCount > 0 ? <HeaderPill label={`Queue ${queuedCount}`} tone="default" /> : null}
                 {!emptyState ? (
                   <Button onClick={openFilePicker} className="bg-[#1f4fff] text-white hover:bg-[#1a43d6]">
@@ -356,8 +364,24 @@ export function TranscribbleApp() {
           </div>
         </header>
 
-        <div className="mx-auto grid max-w-[1800px] grid-cols-1 items-start gap-4 px-4 py-4 sm:gap-5 sm:px-6 lg:grid-cols-[minmax(280px,320px)_minmax(0,1fr)_minmax(300px,340px)] lg:px-8 xl:grid-cols-[320px_minmax(0,1fr)_340px]">
-          <aside className="order-3 self-start overflow-hidden rounded-[28px] border border-black/10 bg-[#faf7f1] shadow-[0_18px_60px_rgba(30,35,45,0.08)] lg:order-none">
+        {(capabilityIssue || notice) && (
+          <div className="mx-auto max-w-[1800px] px-4 pt-4 sm:px-6 lg:px-8">
+            <div className="space-y-3">
+              {capabilityIssue ? (
+                <Banner tone="error" body={capabilityIssue} onDismiss={() => setNotice(null)} />
+              ) : null}
+              {notice ? <Banner tone={notice.tone} body={notice.message} onDismiss={() => setNotice(null)} /> : null}
+            </div>
+          </div>
+        )}
+
+        <div
+          className={`mx-auto max-w-[1800px] px-4 py-4 sm:px-6 sm:py-5 lg:px-8 ${
+            showLibrary ? "grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(290px,320px)_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)]" : ""
+          }`}
+        >
+          {showLibrary ? (
+            <aside className="order-2 self-start overflow-hidden rounded-[28px] border border-black/10 bg-[#faf7f1] shadow-[0_18px_60px_rgba(30,35,45,0.08)] lg:order-none">
             <div className="border-b border-black/10 px-5 py-5">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -384,11 +408,6 @@ export function TranscribbleApp() {
             </div>
 
             <div className="px-3 py-4 lg:max-h-[calc(100svh-8rem)] lg:overflow-y-auto">
-              {capabilityIssue ? (
-                <Banner tone="error" body={capabilityIssue} onDismiss={() => setNotice(null)} />
-              ) : null}
-              {notice ? <Banner tone={notice.tone} body={notice.message} onDismiss={() => setNotice(null)} /> : null}
-
               {libraryQuery.trim() ? (
                 <section className="space-y-3 px-2">
                   <SectionHeading icon={Search} title="Cross-project matches" />
@@ -473,13 +492,14 @@ export function TranscribbleApp() {
               )}
             </div>
           </aside>
+          ) : null}
 
-          <main className="order-1 min-w-0 space-y-5 lg:order-none">
+          <main className={`order-1 min-w-0 space-y-5 ${showLibrary ? "lg:order-none" : ""}`}>
             <WorkspaceSurface className="overflow-hidden">
               {workspaceReady ? (
                 emptyState ? (
                   <div className="px-5 py-6 sm:px-8 sm:py-8 lg:px-10">
-                    <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+                    <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,360px)]">
                       <div className="max-w-3xl">
                         <div className="text-xs font-semibold uppercase tracking-[0.24em] text-[#6f6a60]">
                           Private voice workspace
@@ -538,62 +558,38 @@ export function TranscribbleApp() {
 
                       <div className="rounded-[28px] border border-black/10 bg-[#f4ede0] p-5">
                         <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">
-                          Before you start
+                          This browser
                         </div>
                         <div className="mt-2 text-xl font-semibold tracking-tight text-[#171a20]">
-                          {setupReady ? "This browser is ready" : "One quick browser setup"}
+                          {setupReady ? "Ready for recordings here" : "One quick setup"}
                         </div>
                         <p className="mt-2 text-sm leading-6 text-[#5c5a52]">{setupSummary}</p>
 
-                        <div className="mt-4 grid gap-3">
-                          <TrustRow
-                            title="Local setup"
-                            body={setupBreakdownLabel}
-                            tone={setupReady ? "success" : "default"}
-                          />
-                          <TrustRow
-                            title="Storage protection"
-                            body={storageProtectionLabel}
-                            tone={storageState?.persisted ? "success" : "default"}
-                          />
-                          <TrustRow title="Storage use" body={storageUsageLabel} />
-                          <TrustRow title="Large-file storage" body={storageModeLabel} />
+                        <div className="mt-4 space-y-3 text-sm leading-6 text-[#5c5a52]">
+                          <p>{setupBreakdownLabel}</p>
+                          <p>Recordings, transcripts, edits, and saved moments stay in this browser.</p>
+                          <p>{storageProtectionLabel}</p>
                         </div>
 
                         <div className="mt-4 rounded-[22px] border border-dashed border-[#d8d0c2] bg-[#faf7f1] px-4 py-4">
-                          <div className="font-medium text-[#171a20]">Drop audio or video anywhere in the workspace</div>
+                          <div className="font-medium text-[#171a20]">Add audio or video anywhere in the workspace</div>
                           <div className="mt-1 text-sm leading-6 text-[#5c5a52]">
                             {supportedFormatsLabel} up to {MAX_FILE_SIZE_LABEL} each. Multiple files line up
                             automatically and stay on this device.
                           </div>
                         </div>
 
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {storageState?.canRequestPersistence ? (
-                            <Button variant="outline" className="bg-white" onClick={() => void askForPersistentStorage()}>
-                              Protect storage
-                            </Button>
-                          ) : null}
-                          <Button variant="outline" className="bg-white" onClick={() => void refreshStorageState()}>
-                            Refresh browser status
-                          </Button>
-                          {installState.installPromptAvailable ? (
-                            <Button variant="outline" className="bg-white" onClick={() => void promptInstall()}>
-                              Install app
-                            </Button>
-                          ) : null}
-                        </div>
-
-                        <div className="mt-4 text-sm leading-6 text-[#5c5a52]">
-                          Internet is still needed the first time this browser downloads the local transcription tools.
-                          After that, normal work stays local here.
-                        </div>
+                        {browserNote ? (
+                          <div className="mt-4 rounded-2xl border border-[#d6d0c3] bg-[#faf7f1] px-4 py-3 text-sm leading-6 text-[#5c5a52]">
+                            {browserNote}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   </div>
                 ) : (
-                  <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_minmax(320px,360px)]">
-                    <div className="min-w-0 space-y-5 border-b border-black/10 px-5 py-5 2xl:border-b-0 2xl:border-r">
+                  <div className={showInspector ? "grid gap-5 2xl:grid-cols-[minmax(0,1fr)_minmax(380px,420px)]" : "px-5 py-5"}>
+                    <div className={`min-w-0 space-y-5 ${showInspector ? "border-b border-black/10 px-5 py-5 2xl:border-b-0 2xl:border-r" : ""}`}>
                       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-semibold uppercase tracking-[0.24em] text-[#6d6a61]">
@@ -612,8 +608,6 @@ export function TranscribbleApp() {
                             <span>{currentFileMeta.fileSizeLabel}</span>
                             <span className="text-[#bab4aa]">•</span>
                             <span>{currentFileMeta.durationLabel}</span>
-                            <span className="text-[#bab4aa]">•</span>
-                            <span>{currentFileMeta.runtimeLabel}</span>
                           </div>
                           <div className="mt-3 max-w-2xl text-sm leading-6 text-[#5c5a52]">
                             {selectedProjectStatus?.summary}
@@ -622,15 +616,22 @@ export function TranscribbleApp() {
 
                         <div className="flex flex-wrap items-center gap-2">
                           <StatusBadge status={selectedProject?.status ?? "queued"} step={selectedProjectStatus?.step} />
-                          <Badge className="border border-black/10 bg-white text-[#2b2d35]">
-                            {selectedProjectStats
-                              ? `${selectedProjectStats.wordCount} words`
-                              : "Transcript on the way"}
-                          </Badge>
-                          <Button variant="outline" className="bg-transparent" onClick={onCopyTranscript} disabled={!hasTranscript}>
-                            <Copy className="mr-2 h-4 w-4" />
-                            {copied ? "Copied" : "Copy"}
-                          </Button>
+                          {selectedProjectStats ? (
+                            <Badge className="border border-black/10 bg-white text-[#2b2d35]">
+                              {selectedProjectStats.wordCount} words
+                            </Badge>
+                          ) : null}
+                          {!selectedProjectStats && selectedProjectView ? (
+                            <Badge className="border border-black/10 bg-white text-[#2b2d35]">
+                              {selectedProjectView.transcriptBadgeLabel}
+                            </Badge>
+                          ) : null}
+                          {showExportActions ? (
+                            <Button variant="outline" className="bg-transparent" onClick={onCopyTranscript}>
+                              <Copy className="mr-2 h-4 w-4" />
+                              {copied ? "Copied" : "Copy"}
+                            </Button>
+                          ) : null}
                         </div>
                       </div>
 
@@ -639,7 +640,7 @@ export function TranscribbleApp() {
                           <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-start 2xl:justify-between">
                             <div className="min-w-0 flex-1">
                               <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">
-                                Working now
+                                Current status
                               </div>
                               <div className="mt-1 text-2xl font-semibold tracking-tight text-[#171a20]">
                                 {selectedProjectStatus?.headline ?? "Waiting to start"}
@@ -691,24 +692,34 @@ export function TranscribbleApp() {
                                   variant="outline"
                                   className="bg-white/70"
                                   onClick={() => selectAdjacentSegment(-1)}
-                                  disabled={!hasTranscript}
+                                  disabled={!selectedProjectView?.canUseTranscript}
                                 >
-                                  Previous segment
+                                  Previous line
                                 </Button>
                                 <Button
                                   type="button"
                                   variant="outline"
                                   className="bg-white/70"
                                   onClick={() => selectAdjacentSegment(1)}
-                                  disabled={!hasTranscript}
+                                  disabled={!selectedProjectView?.canUseTranscript}
                                 >
-                                  Next segment
+                                  Next line
                                 </Button>
                               </div>
 
                               <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-[#5c5a52]">
                                 <span className="font-medium text-[#171a20]">Playback</span>
-                                <span>{formatDuration(currentTime)} / {currentFileMeta.durationLabel}</span>
+                                {mediaUrl ? (
+                                  <span>
+                                    {formatDuration(currentTime)} / {currentFileMeta.durationLabel}
+                                  </span>
+                                ) : (
+                                  <span>
+                                    {selectedProjectView?.step === "error"
+                                      ? "The recording is still saved here, but the player could not open it right now."
+                                      : "Player controls appear here when the saved recording is ready."}
+                                  </span>
+                                )}
                                 {activeChapter ? (
                                   <>
                                     <span className="text-[#bab4aa]">•</span>
@@ -717,141 +728,188 @@ export function TranscribbleApp() {
                                 ) : null}
                               </div>
 
-                              <div className="mt-4">
-                                <Progress value={currentProgress} className="h-2 bg-black/10 [&>div]:bg-[#1f4fff]" />
-                                <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-sm text-[#5c5a52]">
-                                  <span>{selectedProjectStatus?.headline}</span>
-                                  <span>{currentProgress.toFixed(0)}%</span>
+                              {showErrorActions ? (
+                                <div className="mt-4 rounded-[22px] border border-[#f3b3b3] bg-[#fff0ef] p-4">
+                                  <div className="text-sm font-medium text-[#7c2626]">
+                                    This recording did not finish, but it is still saved in this browser.
+                                  </div>
+                                  <div className="mt-2 text-sm leading-6 text-[#7c2626]">
+                                    Try again when you are ready, or remove it if you no longer need it.
+                                  </div>
                                 </div>
-                              </div>
+                              ) : (
+                                <div className="mt-4">
+                                  <Progress value={currentProgress} className="h-2 bg-black/10 [&>div]:bg-[#1f4fff]" />
+                                  <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-sm text-[#5c5a52]">
+                                    <span>{selectedProjectStatus?.headline}</span>
+                                    <span>{currentProgress.toFixed(0)}%</span>
+                                  </div>
+                                </div>
+                              )}
                             </div>
 
                             <div className="flex flex-wrap gap-2">
-                              {EXPORT_FORMATS.map((format) => (
+                              {showErrorActions ? (
+                                <>
+                                  <Button variant="outline" className="bg-white/70" onClick={() => retryProject(selectedProject?.id ?? "")}>
+                                    <RotateCcw className="mr-2 h-4 w-4" />
+                                    Try again
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    className="text-[#2b2d35] hover:bg-black/5"
+                                    onClick={() => removeProject(selectedProject?.id ?? "")}
+                                  >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Remove
+                                  </Button>
+                                </>
+                              ) : showExportActions ? (
+                                EXPORT_FORMATS.map((format) => (
+                                  <Button
+                                    key={format}
+                                    variant="outline"
+                                    className="bg-white/70 uppercase tracking-[0.18em] text-[#2b2d35]"
+                                    onClick={() => onDownloadTranscript(format)}
+                                  >
+                                    <Download className="mr-2 h-4 w-4" />
+                                    {format}
+                                  </Button>
+                                ))
+                              ) : !setupReady ? (
                                 <Button
-                                  key={format}
                                   variant="outline"
-                                  className="bg-white/70 uppercase tracking-[0.18em] text-[#2b2d35]"
-                                  onClick={() => onDownloadTranscript(format)}
-                                  disabled={!hasTranscript}
+                                  className="bg-white/70"
+                                  onClick={() => {
+                                    void primeWorkspaceSetup();
+                                  }}
+                                  disabled={setupActionDisabled}
                                 >
-                                  <Download className="mr-2 h-4 w-4" />
-                                  {format}
+                                  <ShieldCheck className="mr-2 h-4 w-4" />
+                                  {assetSetup.warmingModel || assetSetup.warmingMedia
+                                    ? "Getting ready…"
+                                    : effectiveOnline
+                                      ? "Get this browser ready"
+                                      : "Go online once"}
                                 </Button>
-                              ))}
-                            </div>
-                          </div>
-
-                          <TimelineOverview
-                            duration={selectedProjectStats?.duration ?? selectedProject?.duration ?? 0}
-                            currentTime={currentTime}
-                            segments={transcriptSegments}
-                            turns={transcriptTurns}
-                            chapters={selectedProjectChapters}
-                            marks={currentProjectMarks}
-                            savedRanges={currentProjectRanges}
-                            matchedSegmentIds={matchedSegmentIds}
-                            focusedSegmentId={focusedSegmentId}
-                            playbackSegmentId={playbackSegmentId}
-                            onSeek={selectSegment}
-                          />
-
-                          <div className="rounded-[24px] border border-black/10 bg-white/70 p-4">
-                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                              <div>
-                                <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">
-                                  Review range
-                                </div>
-                                <div className="mt-1 text-lg font-semibold tracking-tight text-[#171a20]">
-                                  Save a named moment from the timeline
-                                </div>
-                                <div className="mt-1 text-sm leading-6 text-[#5c5a52]">
-                                  Pick a start and end time, give it a short name, and keep it searchable with the
-                                  transcript.
-                                </div>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                <Button variant="outline" className="bg-white" onClick={() => setRangeStart(null)}>
-                                  Clear start
-                                </Button>
-                                <Button variant="outline" className="bg-white" onClick={() => setRangeEnd(null)}>
-                                  Clear end
-                                </Button>
-                              </div>
-                            </div>
-
-                            <div className="mt-4 grid gap-3 lg:grid-cols-[repeat(2,minmax(0,1fr))_auto]">
-                              <div className="rounded-2xl border border-black/10 bg-[#f8f4eb] px-4 py-3">
-                                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6d6a61]">
-                                  Start
-                                </div>
-                                <div className="mt-2 text-lg font-semibold text-[#171a20]">
-                                  {rangeStart === null ? "Not set" : formatDuration(rangeStart)}
-                                </div>
-                                <div className="mt-3">
-                                  <Button variant="outline" className="w-full bg-white" onClick={() => setRangeEdgeFromPlayback("start")}>
-                                    Set start here
-                                  </Button>
-                                </div>
-                              </div>
-                              <div className="rounded-2xl border border-black/10 bg-[#f8f4eb] px-4 py-3">
-                                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6d6a61]">
-                                  End
-                                </div>
-                                <div className="mt-2 text-lg font-semibold text-[#171a20]">
-                                  {rangeEnd === null ? "Not set" : formatDuration(rangeEnd)}
-                                </div>
-                                <div className="mt-3">
-                                  <Button variant="outline" className="w-full bg-white" onClick={() => setRangeEdgeFromPlayback("end")}>
-                                    Set end here
-                                  </Button>
-                                </div>
-                              </div>
-                              <div className="rounded-2xl border border-black/10 bg-[#f8f4eb] px-4 py-3">
-                                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6d6a61]">
-                                  Shortcut
-                                </div>
-                                <div className="mt-2 text-sm leading-6 text-[#5c5a52]">
-                                  Use the selected transcript line as a quick review range.
-                                </div>
-                                <div className="mt-3">
-                                  <Button variant="outline" className="w-full bg-white" onClick={useFocusedSegmentRange} disabled={!focusedSegment}>
-                                    Use selected line
-                                  </Button>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                              <Input
-                                value={rangeLabelDraft}
-                                onChange={(event) => setRangeLabelDraft(event.target.value)}
-                                placeholder="Name this saved moment"
-                                className="border-black/10 bg-white"
-                              />
-                              <Input
-                                value={rangeNoteDraft}
-                                onChange={(event) => setRangeNoteDraft(event.target.value)}
-                                placeholder="Add a short note (optional)"
-                                className="border-black/10 bg-white"
-                              />
-                              <Button className="bg-[#16181d] text-white hover:bg-[#0f1115]" onClick={onSaveRange} disabled={!canSaveRange}>
-                                Save moment
-                              </Button>
-                            </div>
-
-                            <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[#5c5a52]">
-                              <Badge className="border border-black/10 bg-white text-[#2b2d35]">
-                                {rangeBounds ? `${formatDuration(rangeBounds.start)}-${formatDuration(rangeBounds.end)}` : "Choose a range"}
-                              </Badge>
-                              <Badge className="border border-black/10 bg-white text-[#2b2d35]">
-                                {rangeDraftSegments.length} linked segment{rangeDraftSegments.length === 1 ? "" : "s"}
-                              </Badge>
-                              {rangeBounds ? (
-                                <span>{Math.max(rangeBounds.end - rangeBounds.start, 0).toFixed(1)} seconds</span>
                               ) : null}
                             </div>
                           </div>
+
+                          {showTimelineOverview ? (
+                            <TimelineOverview
+                              duration={selectedProjectStats?.duration ?? selectedProject?.duration ?? 0}
+                              currentTime={currentTime}
+                              segments={transcriptSegments}
+                              turns={transcriptTurns}
+                              chapters={selectedProjectChapters}
+                              marks={currentProjectMarks}
+                              savedRanges={currentProjectRanges}
+                              matchedSegmentIds={matchedSegmentIds}
+                              focusedSegmentId={focusedSegmentId}
+                              playbackSegmentId={playbackSegmentId}
+                              onSeek={selectSegment}
+                            />
+                          ) : null}
+
+                          {showReviewComposer ? (
+                            <div className="rounded-[24px] border border-black/10 bg-white/70 p-4">
+                              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                <div>
+                                  <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">
+                                    Saved moment
+                                  </div>
+                                  <div className="mt-1 text-lg font-semibold tracking-tight text-[#171a20]">
+                                    Save a named moment from the timeline
+                                  </div>
+                                  <div className="mt-1 text-sm leading-6 text-[#5c5a52]">
+                                    Pick a start and end time, give it a short name, and keep it searchable with the
+                                    transcript.
+                                  </div>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  <Button variant="outline" className="bg-white" onClick={() => setRangeStart(null)}>
+                                    Clear start
+                                  </Button>
+                                  <Button variant="outline" className="bg-white" onClick={() => setRangeEnd(null)}>
+                                    Clear end
+                                  </Button>
+                                </div>
+                              </div>
+
+                              <div className="mt-4 grid gap-3 lg:grid-cols-[repeat(2,minmax(0,1fr))_auto]">
+                                <div className="rounded-2xl border border-black/10 bg-[#f8f4eb] px-4 py-3">
+                                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6d6a61]">
+                                    Start
+                                  </div>
+                                  <div className="mt-2 text-lg font-semibold text-[#171a20]">
+                                    {rangeStart === null ? "Not set" : formatDuration(rangeStart)}
+                                  </div>
+                                  <div className="mt-3">
+                                    <Button variant="outline" className="w-full bg-white" onClick={() => setRangeEdgeFromPlayback("start")}>
+                                      Set start here
+                                    </Button>
+                                  </div>
+                                </div>
+                                <div className="rounded-2xl border border-black/10 bg-[#f8f4eb] px-4 py-3">
+                                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6d6a61]">
+                                    End
+                                  </div>
+                                  <div className="mt-2 text-lg font-semibold text-[#171a20]">
+                                    {rangeEnd === null ? "Not set" : formatDuration(rangeEnd)}
+                                  </div>
+                                  <div className="mt-3">
+                                    <Button variant="outline" className="w-full bg-white" onClick={() => setRangeEdgeFromPlayback("end")}>
+                                      Set end here
+                                    </Button>
+                                  </div>
+                                </div>
+                                <div className="rounded-2xl border border-black/10 bg-[#f8f4eb] px-4 py-3">
+                                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6d6a61]">
+                                    Shortcut
+                                  </div>
+                                  <div className="mt-2 text-sm leading-6 text-[#5c5a52]">
+                                    Use the selected transcript line as a quick starting range.
+                                  </div>
+                                  <div className="mt-3">
+                                    <Button variant="outline" className="w-full bg-white" onClick={useFocusedSegmentRange} disabled={!focusedSegment}>
+                                      Use selected line
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                                <Input
+                                  value={rangeLabelDraft}
+                                  onChange={(event) => setRangeLabelDraft(event.target.value)}
+                                  placeholder="Name this saved moment"
+                                  className="border-black/10 bg-white"
+                                />
+                                <Input
+                                  value={rangeNoteDraft}
+                                  onChange={(event) => setRangeNoteDraft(event.target.value)}
+                                  placeholder="Add a short note (optional)"
+                                  className="border-black/10 bg-white"
+                                />
+                                <Button className="bg-[#16181d] text-white hover:bg-[#0f1115]" onClick={onSaveRange} disabled={!canSaveRange}>
+                                  Save moment
+                                </Button>
+                              </div>
+
+                              <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[#5c5a52]">
+                                <Badge className="border border-black/10 bg-white text-[#2b2d35]">
+                                  {rangeBounds ? `${formatDuration(rangeBounds.start)}-${formatDuration(rangeBounds.end)}` : "Choose a range"}
+                                </Badge>
+                                <Badge className="border border-black/10 bg-white text-[#2b2d35]">
+                                  {rangeDraftSegments.length} linked segment{rangeDraftSegments.length === 1 ? "" : "s"}
+                                </Badge>
+                                {rangeBounds ? (
+                                  <span>{Math.max(rangeBounds.end - rangeBounds.start, 0).toFixed(1)} seconds</span>
+                                ) : null}
+                              </div>
+                            </div>
+                          ) : null}
 
                           {assetProgressItems.length > 0 ? (
                             <div className="space-y-2 border-t border-black/10 pt-4">
@@ -867,39 +925,35 @@ export function TranscribbleApp() {
                             </div>
                           ) : null}
 
-                          <div className="overflow-hidden rounded-[20px] border border-black/10 bg-black/5">
-                          {mediaUrl ? (
-                            selectedProject?.mediaKind === "video" ? (
-                              <video
-                                ref={attachMediaRef}
-                                src={mediaUrl}
-                                controls
-                                className="aspect-video w-full bg-black"
-                                onLoadedMetadata={mediaHandlers.onLoadedMetadata}
-                                onTimeUpdate={mediaHandlers.onTimeUpdate}
-                                onPlay={mediaHandlers.onPlay}
-                                onPause={mediaHandlers.onPause}
-                              />
-                            ) : (
-                              <div className="p-5">
-                                <audio
+                          {showMediaPanel ? (
+                            <div className="overflow-hidden rounded-[20px] border border-black/10 bg-black/5">
+                              {selectedProject?.mediaKind === "video" ? (
+                                <video
                                   ref={attachMediaRef}
-                                  src={mediaUrl}
+                                  src={mediaUrl ?? undefined}
                                   controls
-                                  className="w-full"
+                                  className="aspect-video w-full bg-black"
                                   onLoadedMetadata={mediaHandlers.onLoadedMetadata}
                                   onTimeUpdate={mediaHandlers.onTimeUpdate}
                                   onPlay={mediaHandlers.onPlay}
                                   onPause={mediaHandlers.onPause}
                                 />
-                              </div>
-                            )
-                          ) : (
-                            <div className="flex min-h-[180px] items-center justify-center px-6 py-10 text-center text-[#5c5a52]">
-                              The source media is stored locally and will appear here when the project is selected.
+                              ) : (
+                                <div className="p-5">
+                                  <audio
+                                    ref={attachMediaRef}
+                                    src={mediaUrl ?? undefined}
+                                    controls
+                                    className="w-full"
+                                    onLoadedMetadata={mediaHandlers.onLoadedMetadata}
+                                    onTimeUpdate={mediaHandlers.onTimeUpdate}
+                                    onPlay={mediaHandlers.onPlay}
+                                    onPause={mediaHandlers.onPause}
+                                  />
+                                </div>
+                              )}
                             </div>
-                          )}
-                          </div>
+                          ) : null}
                         </div>
                       </div>
 
@@ -911,22 +965,23 @@ export function TranscribbleApp() {
                                 Transcript
                               </div>
                               <div className="mt-1 text-lg font-semibold tracking-tight">
-                                Review and search the recording
+                                {selectedProjectView?.canUseTranscript ? "Review and search the recording" : "Transcript"}
                               </div>
                             </div>
 
-                            <div className="relative w-full max-w-md">
+                            <div className={`relative w-full max-w-md ${showTranscriptSearch ? "" : "opacity-70"}`}>
                               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8b877e]" />
                               <Input
                                 ref={transcriptSearchRef}
                                 value={transcriptQuery}
                                 onChange={(event) => setTranscriptQuery(event.target.value)}
-                                placeholder="Search inside this transcript"
+                                placeholder={selectedProjectView?.transcriptSearchPlaceholder ?? "Search inside this transcript"}
                                 className="border-black/10 bg-white pl-10 text-sm"
+                                disabled={!showTranscriptSearch}
                               />
                             </div>
 
-                            {transcriptQuery.trim() ? (
+                            {showTranscriptSearch && transcriptQuery.trim() ? (
                               <div className="flex items-center gap-2">
                                 <Button
                                   type="button"
@@ -952,9 +1007,9 @@ export function TranscribbleApp() {
 
                           <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[#5c5a52]">
                             <Badge className="border border-black/10 bg-white text-[#2b2d35]">
-                              {hasTranscript ? `${transcriptSegments.length} segments` : "Transcript on the way"}
+                              {selectedProjectView?.transcriptBadgeLabel ?? "Transcript"}
                             </Badge>
-                            {selectedProjectStats ? (
+                            {selectedProjectView?.canUseTranscript && selectedProjectStats ? (
                               <>
                                 <Badge className="border border-black/10 bg-white text-[#2b2d35]">
                                   {selectedProjectStats.turnCount} turns
@@ -967,7 +1022,7 @@ export function TranscribbleApp() {
                                 </Badge>
                               </>
                             ) : null}
-                            {transcriptQuery.trim() ? (
+                            {showTranscriptSearch && transcriptQuery.trim() ? (
                               <span>{transcriptSearchResults.length} match{transcriptSearchResults.length === 1 ? "" : "es"}</span>
                             ) : null}
                           </div>
@@ -976,7 +1031,7 @@ export function TranscribbleApp() {
                         <div className="max-h-[calc(100vh-24rem)] overflow-y-auto px-4 py-4">
                           {hasTranscript ? (
                             <div className="space-y-3">
-                              {transcriptSearchResults.length > 0 && transcriptQuery.trim() ? (
+                              {transcriptSearchResults.length > 0 && showTranscriptSearch && transcriptQuery.trim() ? (
                                 <div className="mb-4 space-y-2 rounded-2xl border border-[#d6d0c3] bg-[#f6f1e7] p-3">
                                   {transcriptSearchResults.slice(0, 6).map((result) => (
                                     <button
@@ -1015,7 +1070,7 @@ export function TranscribbleApp() {
                                 />
                               ))}
                             </div>
-                          ) : partialTranscript ? (
+                          ) : partialTranscript && selectedProjectView?.step === "transcribing" ? (
                             <div className="space-y-4 rounded-[22px] border border-[#d9d1c2] bg-[#f6f1e7] p-5">
                               <div className="text-sm font-medium text-[#1a1c23]">Live local transcript preview</div>
                               <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-[#232730]">
@@ -1024,8 +1079,11 @@ export function TranscribbleApp() {
                             </div>
                           ) : (
                             <EmptyPanel
-                              title="Transcript workspace is waiting"
-                              body="Choose or queue local media to populate the timeline, search index, and evidence-linked outputs."
+                              title={selectedProjectView?.transcriptEmptyTitle ?? "Transcript"}
+                              body={
+                                selectedProjectView?.transcriptEmptyBody ??
+                                "Choose or queue local media to populate the transcript."
+                              }
                               icon={FileText}
                             />
                           )}
@@ -1033,33 +1091,34 @@ export function TranscribbleApp() {
                       </div>
                     </div>
 
-                    <div className="px-5 py-5 2xl:max-h-[calc(100svh-8rem)] 2xl:overflow-y-auto">
-                      <div className="rounded-[26px] border border-black/10 bg-[#fcfbf7] p-3">
-                        <div className="grid grid-cols-2 gap-2">
-                          <InspectorTabButton
-                            active={inspectorTab === "selection"}
-                            onClick={() => setInspectorTab("selection")}
-                            label="Selection"
-                          />
-                          <InspectorTabButton
-                            active={inspectorTab === "outline"}
-                            onClick={() => setInspectorTab("outline")}
-                            label="Outline"
-                          />
-                          <InspectorTabButton
-                            active={inspectorTab === "insights"}
-                            onClick={() => setInspectorTab("insights")}
-                            label="Insights"
-                          />
-                          <InspectorTabButton
-                            active={inspectorTab === "session"}
-                            onClick={() => setInspectorTab("session")}
-                            label="Session"
-                          />
+                    {showInspector ? (
+                      <div className="px-5 py-5 2xl:max-h-[calc(100svh-8rem)] 2xl:overflow-y-auto">
+                        <div className="rounded-[26px] border border-black/10 bg-[#fcfbf7] p-3">
+                          <div className="grid grid-cols-2 gap-2">
+                            <InspectorTabButton
+                              active={inspectorTab === "selection"}
+                              onClick={() => setInspectorTab("selection")}
+                              label="Selection"
+                            />
+                            <InspectorTabButton
+                              active={inspectorTab === "outline"}
+                              onClick={() => setInspectorTab("outline")}
+                              label="Outline"
+                            />
+                            <InspectorTabButton
+                              active={inspectorTab === "insights"}
+                              onClick={() => setInspectorTab("insights")}
+                              label="Insights"
+                            />
+                            <InspectorTabButton
+                              active={inspectorTab === "session"}
+                              onClick={() => setInspectorTab("session")}
+                              label="Session"
+                            />
+                          </div>
                         </div>
-                      </div>
 
-                      <div className="mt-5 space-y-5">
+                        <div className="mt-5 space-y-5">
                         {inspectorTab === "selection" ? (
                           <WorkspaceSection
                             eyebrow="Selection"
@@ -1307,7 +1366,7 @@ export function TranscribbleApp() {
                           <WorkspaceSection
                             eyebrow="Session"
                             title="This recording and browser"
-                            description="Use this panel to check local storage, first-run setup, and what this browser can do."
+                            description="Check what is saved here, what this browser is ready for, and what support is available."
                           >
                             <StatsGrid
                               stats={[
@@ -1326,7 +1385,7 @@ export function TranscribbleApp() {
                               <div className="flex items-start gap-3">
                                 <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#1f4fff]" />
                                 <div>
-                                  Media, transcripts, edits, saved ranges, and search stay local in browser storage.
+                                  Media, transcripts, edits, saved ranges, and search stay in this browser.
                                   No paid API is required for the core workflow.
                                 </div>
                               </div>
@@ -1353,13 +1412,14 @@ export function TranscribbleApp() {
                                 <Shortcut hint="Search library" keys={["Cmd/Ctrl", "K"]} />
                                 <Shortcut hint="Play or pause" keys={["Space"]} />
                                 <Shortcut hint="Bookmark selection" keys={["B"]} />
-                                <Shortcut hint="Next or previous segment" keys={["J", "K"]} />
+                                <Shortcut hint="Next or previous line" keys={["J", "K"]} />
                               </div>
                             </div>
                           </WorkspaceSection>
                         ) : null}
+                        </div>
                       </div>
-                    </div>
+                    ) : null}
                   </div>
                 )
               ) : (
@@ -1369,139 +1429,6 @@ export function TranscribbleApp() {
               )}
             </WorkspaceSurface>
           </main>
-
-          <aside className="order-2 self-start space-y-4 lg:order-none lg:space-y-5">
-            <WorkspaceSurface className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">
-                    This browser
-                  </div>
-                  <div className="mt-1 text-lg font-semibold tracking-tight">
-                    {setupReady ? "Ready for local work" : "Needs first setup"}
-                  </div>
-                </div>
-                <Badge className="border border-black/10 bg-white text-[#2b2d35]">
-                  {effectiveOnline ? "Online" : "Offline"}
-                </Badge>
-              </div>
-
-              <div className="mt-4 space-y-3">
-                <ActionNote
-                  icon={ShieldCheck}
-                  title="Saved on this device"
-                  body="Recordings, transcripts, edits, highlights, and search all stay in this browser."
-                  meta={storageProtectionLabel}
-                  action={
-                    storageState?.canRequestPersistence ? (
-                      <Button size="sm" variant="outline" className="border-black/10 bg-white" onClick={() => void askForPersistentStorage()}>
-                        Protect storage
-                      </Button>
-                    ) : null
-                  }
-                />
-                <ActionNote
-                  icon={Cpu}
-                  title={setupReady ? "Local transcription is ready" : "Finish the one-time setup"}
-                  body={setupSummary}
-                  meta={setupBreakdownLabel}
-                  action={
-                    !setupReady ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="border-black/10 bg-white"
-                        onClick={() => {
-                          void primeWorkspaceSetup();
-                        }}
-                        disabled={
-                          assetSetup.warmingModel ||
-                          assetSetup.warmingMedia ||
-                          queuedCount > 0 ||
-                          !effectiveOnline
-                        }
-                      >
-                        {assetSetup.warmingModel || assetSetup.warmingMedia ? "Getting ready…" : "Get ready"}
-                      </Button>
-                    ) : (
-                      <Button size="sm" variant="outline" className="border-black/10 bg-white" onClick={resetSetupState}>
-                        Reset setup status
-                      </Button>
-                    )
-                  }
-                />
-                <ActionNote
-                  icon={Download}
-                  title={installState.installed ? "App mode is active" : "Install Transcribble"}
-                  body={
-                    installState.installed
-                      ? "This browser reports that Transcribble is already installed."
-                      : installState.installPromptAvailable
-                        ? "Install Transcribble for a cleaner app-like launch after you've visited it once."
-                        : installState.shellReady
-                          ? "The app shell is cached, but this browser is not offering an install prompt right now."
-                          : "App install support is still loading in this browser."
-                  }
-                  meta={storageModeLabel}
-                  action={
-                    installState.installPromptAvailable ? (
-                      <Button size="sm" variant="outline" className="border-black/10 bg-white" onClick={() => void promptInstall()}>
-                        Install
-                      </Button>
-                    ) : (
-                      <Button size="sm" variant="outline" className="border-black/10 bg-white" onClick={() => void refreshStorageState()}>
-                        Refresh
-                      </Button>
-                    )
-                  }
-                />
-                {storageState?.caveats.slice(0, 1).map((caveat) => (
-                  <ActionNote key={caveat} icon={AlertTriangle} title="Browser caveat" body={caveat} />
-                ))}
-              </div>
-            </WorkspaceSurface>
-
-            <WorkspaceSurface className="p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">Snapshot</div>
-                  <div className="mt-1 text-lg font-semibold tracking-tight">Queue and saved work</div>
-                </div>
-                <Badge className="border border-black/10 bg-white text-[#2b2d35]">
-                  {projects.length} session{projects.length === 1 ? "" : "s"}
-                </Badge>
-              </div>
-
-              <div className="mt-3 text-sm leading-6 text-[#5c5a52]">
-                {emptyState
-                  ? "Start with a recording and Transcribble will build your saved library from there."
-                  : selectedProject
-                    ? `${selectedProjectStatus?.headline}. ${selectedProjectStatus?.summary}`
-                    : "Pick a saved session to reopen it."}
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <MiniStat label="Queued" value={String(queuedCount)} />
-                <MiniStat label="Working" value={String(workingProjectCount)} />
-                <MiniStat label="Ready" value={String(projectGroups.ready.length)} />
-                <MiniStat label="Errored" value={String(projectGroups.errored.length)} />
-              </div>
-
-              {selectedProject ? (
-                <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#6d6a61]">
-                  <span className="rounded-full border border-black/10 bg-white px-3 py-1.5">
-                    {currentProjectRanges.length} saved range{currentProjectRanges.length === 1 ? "" : "s"}
-                  </span>
-                  <span className="rounded-full border border-black/10 bg-white px-3 py-1.5">
-                    {currentProjectMarks.length} quick mark{currentProjectMarks.length === 1 ? "" : "s"}
-                  </span>
-                  <span className="rounded-full border border-black/10 bg-white px-3 py-1.5">
-                    {hasTranscript ? `${transcriptSegments.length} segments` : "Transcript on the way"}
-                  </span>
-                </div>
-              ) : null}
-            </WorkspaceSurface>
-          </aside>
         </div>
 
         <input
@@ -1595,40 +1522,6 @@ function FeatureCue({
       </div>
       <div className="mt-3 font-medium text-[#171a20]">{title}</div>
       <div className="mt-1 text-sm leading-6 text-[#5c5a52]">{body}</div>
-    </div>
-  );
-}
-
-function ActionNote({
-  icon: Icon,
-  title,
-  body,
-  meta,
-  action,
-}: {
-  icon: typeof Search;
-  title: string;
-  body: string;
-  meta?: string;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-[22px] border border-black/10 bg-[#fcfbf7] px-4 py-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-[#eef2ff] text-[#1f4fff]">
-            <Icon className="h-4 w-4" />
-          </div>
-          <div className="min-w-0">
-            <div className="font-medium text-[#171a20]">{title}</div>
-            <div className="mt-1 text-sm leading-6 text-[#5c5a52]">{body}</div>
-            {meta ? (
-              <div className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#6d6a61]">{meta}</div>
-            ) : null}
-          </div>
-        </div>
-        {action ? <div className="shrink-0">{action}</div> : null}
-      </div>
     </div>
   );
 }
@@ -1978,8 +1871,8 @@ function SetupChecklist({
     <div className="mt-5 rounded-2xl border border-black/10 bg-white p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">Browser readiness</div>
-          <div className="mt-1 text-base font-semibold tracking-tight text-[#171a20]">Setup, storage, and install status</div>
+          <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6d6a61]">This browser</div>
+          <div className="mt-1 text-base font-semibold tracking-tight text-[#171a20]">Setup, storage, and install details</div>
         </div>
         <Badge
           className={`border ${
@@ -1994,59 +1887,59 @@ function SetupChecklist({
 
       <div className="mt-4 space-y-3">
         <SetupRow
-          title="Local transcription"
+          title="Transcription download"
           description={
             assetSetup.modelReady
               ? `Ready${assetSetup.modelPrimedAt ? ` since ${new Date(assetSetup.modelPrimedAt).toLocaleString()}` : ""}.`
-              : "Needed once per browser profile before offline reuse is dependable."
+              : "Needed once before this browser can transcribe on its own."
           }
           ready={assetSetup.modelReady}
           loading={assetSetup.warmingModel}
           disabled={busy}
-          buttonLabel="Get ready"
+          buttonLabel="Download now"
           onClick={onPrimeModel}
         />
         <SetupRow
-          title="Video and fallback media support"
+          title="Video support"
           description={
             assetSetup.mediaReady
               ? `Ready${assetSetup.mediaPrimedAt ? ` since ${new Date(assetSetup.mediaPrimedAt).toLocaleString()}` : ""}.`
-              : "Needed for video imports and slower media fallback paths."
+              : "Needed for video imports and some slower browser fallback work."
           }
           ready={assetSetup.mediaReady}
           loading={assetSetup.warmingMedia}
           disabled={busy}
-          buttonLabel="Get ready"
+          buttonLabel="Download now"
           onClick={onPrimeMedia}
         />
         <SetupRow
-          title="Protected local storage"
+          title="Keep files here"
           description={
             storageState?.persisted === true
-              ? "This browser says it is less likely to clear Transcribble's saved data."
-              : "Ask the browser to treat Transcribble's local storage as more durable."
+              ? "This browser says it is less likely to clear Transcribble's saved files."
+              : "Ask the browser to be less aggressive about clearing saved files."
           }
           ready={storageState?.persisted === true}
           loading={false}
           disabled={!storageState?.canRequestPersistence}
-          buttonLabel="Protect storage"
+          buttonLabel="Ask browser"
           onClick={onProtectStorage}
         />
         <SetupRow
-          title="App install"
+          title="Install app"
           description={
             installState.installed
-              ? "Transcribble is already installed in app mode."
+              ? "Transcribble is already installed."
               : installState.installPromptAvailable
-                ? "This browser can install Transcribble after you have visited it."
+                ? "This browser can install Transcribble for quicker reopening."
                 : installState.shellReady
-                  ? "The app shell is cached, but this browser is not showing an install prompt."
+                  ? "This browser has the basics cached, but it is not offering install right now."
                   : "Install support is still loading."
           }
           ready={installState.installed}
           loading={false}
           disabled={!installState.installPromptAvailable}
-          buttonLabel="Install"
+          buttonLabel="Install app"
           onClick={onPromptInstall}
         />
       </div>
@@ -2054,8 +1947,8 @@ function SetupChecklist({
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <TrustRow title="Storage use" body={storageUsage} />
         <TrustRow
-          title="Shell cache"
-          body={installState.shellReady ? "Ready for faster return visits" : "Still loading app shell support"}
+          title="Quick reopen"
+          body={installState.shellReady ? "Basic app files are ready for quicker return visits" : "Still preparing quick reopen support"}
           tone={installState.shellReady ? "success" : "default"}
         />
       </div>
@@ -2081,7 +1974,7 @@ function SetupChecklist({
 
       <div className="mt-4 flex flex-wrap gap-2">
         <Button variant="outline" className="bg-white" onClick={onRefreshStorage}>
-          Refresh browser details
+          Refresh details
         </Button>
         <Button variant="outline" className="bg-white" onClick={onResetSetup}>
           Reset setup status
@@ -2089,8 +1982,8 @@ function SetupChecklist({
       </div>
 
       <div className="mt-4 text-sm text-[#5c5a52]">
-        The core workflow stays local, but a brand-new browser profile still needs one online setup before it can
-        reuse the local transcription tools offline.
+        Normal work stays local here, but a brand-new browser profile still needs one online setup before it can
+        transcribe without another download.
       </div>
     </div>
   );
@@ -2210,10 +2103,14 @@ function ProjectRow({
           <span>{new Date(project.updatedAt).toLocaleString()}</span>
         </div>
 
-        {project.status !== "ready" ? (
+        {project.status !== "ready" && project.status !== "error" ? (
           <div className="mt-3">
             <Progress value={project.progress} className="h-1.5 bg-black/10 [&>div]:bg-[#1f4fff]" />
             <div className="mt-2 text-sm text-[#5c5a52]">{status.summary}</div>
+          </div>
+        ) : project.status === "error" ? (
+          <div className="mt-3 rounded-2xl border border-[#f3b3b3] bg-[#fff0ef] px-3 py-3 text-sm leading-6 text-[#7c2626]">
+            {status.summary}
           </div>
         ) : project.transcript ? (
           <div className="mt-3 flex flex-wrap gap-2">
@@ -2230,9 +2127,11 @@ function ProjectRow({
         ) : null}
       </button>
 
-      <div className="mt-3 flex items-center justify-between gap-3">
-        <div className="text-xs text-[#6d6a61]">{project.error ?? status.summary}</div>
-        <div className="flex items-center gap-2">
+      <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-xs leading-5 text-[#6d6a61]">
+          {project.status === "error" ? "The recording is still saved here." : status.summary}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
           {project.status === "error" ? (
             <Button type="button" size="sm" variant="outline" className="bg-white" onClick={onRetry}>
               <RotateCcw className="mr-2 h-4 w-4" />
@@ -2632,37 +2531,17 @@ function StatusBadge({
   status: TranscriptProject["status"];
   step?: TranscriptProject["step"];
 }) {
-  const content =
-    status === "ready"
-      ? ["Ready", "border-[#b2dbbd] bg-[#ecfff1] text-[#17643b]"]
-      : status === "error"
-        ? ["Needs help", "border-[#f3b3b3] bg-[#fff0ef] text-[#7c2626]"]
-        : step === "getting-browser-ready"
-          ? ["Setup", "border-[#c7d6ff] bg-[#eef2ff] text-[#1d3bb8]"]
-          : step === "getting-recording-ready"
-            ? ["Preparing", "border-[#c7d6ff] bg-[#eef2ff] text-[#1d3bb8]"]
-            : step === "saving"
-              ? ["Saving", "border-[#c7d6ff] bg-[#eef2ff] text-[#1d3bb8]"]
-              : status === "queued"
-                ? ["Queued", "border-black/10 bg-white text-[#2b2d35]"]
-                : ["Working", "border-[#c7d6ff] bg-[#eef2ff] text-[#1d3bb8]"];
+  const copy = getProjectStatusCopy({ status, step });
+  const toneClass =
+    copy.tone === "success"
+      ? "border-[#b2dbbd] bg-[#ecfff1] text-[#17643b]"
+      : copy.tone === "warning"
+        ? "border-[#f3b3b3] bg-[#fff0ef] text-[#7c2626]"
+        : copy.tone === "neutral"
+          ? "border-black/10 bg-white text-[#2b2d35]"
+          : "border-[#c7d6ff] bg-[#eef2ff] text-[#1d3bb8]";
 
-  return <Badge className={`border ${content[1]}`}>{content[0]}</Badge>;
-}
-
-function MiniStat({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-black/10 bg-white px-4 py-3">
-      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6d6a61]">{label}</div>
-      <div className="mt-2 text-2xl font-semibold tracking-tight text-[#171a20]">{value}</div>
-    </div>
-  );
+  return <Badge className={`border ${toneClass}`}>{copy.statusLabel}</Badge>;
 }
 
 function Shortcut({
