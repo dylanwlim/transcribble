@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   AudioLines,
@@ -114,6 +114,7 @@ export function TranscribbleApp() {
     updateSelectedSegmentText,
     toggleBookmark,
     toggleHighlight,
+    assignSpeakerLabel,
     primeTranscriptionModel,
     primeMediaRuntime,
     cancelProject,
@@ -427,6 +428,7 @@ export function TranscribbleApp() {
                       assetSetup={assetSetup}
                       onPrimeModel={primeTranscriptionModel}
                       onPrimeMedia={primeMediaRuntime}
+                      onAssignSpeakerLabel={assignSpeakerLabel}
                     />
                   ) : (
                     <ProcessingWorkspace
@@ -992,6 +994,7 @@ function ProcessingWorkspace({
     onTimeUpdate: () => void;
     onPlay: () => void;
     onPause: () => void;
+    onError: () => void;
   };
   onTogglePlayback: () => void;
   setupReady: boolean;
@@ -1243,6 +1246,7 @@ function ReadyWorkspace({
   assetSetup,
   onPrimeModel,
   onPrimeMedia,
+  onAssignSpeakerLabel,
 }: {
   project: TranscriptProject;
   transcriptQuery: string;
@@ -1274,6 +1278,7 @@ function ReadyWorkspace({
     onTimeUpdate: () => void;
     onPlay: () => void;
     onPause: () => void;
+    onError: () => void;
   };
   onTogglePlayback: () => void;
   currentFileMeta: {
@@ -1317,6 +1322,7 @@ function ReadyWorkspace({
   };
   onPrimeModel: () => void;
   onPrimeMedia: () => void;
+  onAssignSpeakerLabel: (turnId: string, label: string) => void;
 }) {
   const markMap = useMemo(() => {
     const map = new Map<string, TranscriptMark[]>();
@@ -1329,6 +1335,16 @@ function ReadyWorkspace({
 
     return map;
   }, [currentProjectMarks]);
+
+  const speakerByTurnIndex = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const turn of transcriptTurns) {
+      if (turn.speakerLabel) {
+        map.set(turn.index, turn.speakerLabel);
+      }
+    }
+    return map;
+  }, [transcriptTurns]);
 
   return (
     <div className="space-y-4">
@@ -1449,6 +1465,7 @@ function ReadyWorkspace({
                   key={segment.id}
                   segment={segment}
                   marks={markMap.get(segment.id) ?? []}
+                  speakerLabel={speakerByTurnIndex.get(segment.turnIndex)}
                   isFocused={segment.id === focusedSegmentId}
                   isPlaying={segment.id === playbackSegmentId}
                   isMatched={transcriptQuery.trim().length > 0 && matchedSegmentIds.has(segment.id)}
@@ -1548,6 +1565,7 @@ function ReadyWorkspace({
               onOpenTurn={(turn) => onSelectSegment(turn.segmentIds[0] ?? "")}
               onOpenChapter={(chapter) => onSelectSegment(chapter.segmentIds[0] ?? "")}
               onOpenMark={(mark) => onSelectSegment(mark.segmentId)}
+              onAssignSpeakerLabel={onAssignSpeakerLabel}
             />
           ) : null}
 
@@ -1617,6 +1635,7 @@ function PlaybackPanel({
     onTimeUpdate: () => void;
     onPlay: () => void;
     onPause: () => void;
+    onError: () => void;
   };
   onTogglePlayback: () => void;
   onSeekByDelta: (deltaSeconds: number) => void;
@@ -1703,6 +1722,7 @@ function PlaybackPanel({
                 onTimeUpdate={mediaHandlers.onTimeUpdate}
                 onPlay={mediaHandlers.onPlay}
                 onPause={mediaHandlers.onPause}
+                onError={mediaHandlers.onError}
               />
             ) : (
               <div className="p-5">
@@ -1715,6 +1735,7 @@ function PlaybackPanel({
                   onTimeUpdate={mediaHandlers.onTimeUpdate}
                   onPlay={mediaHandlers.onPlay}
                   onPause={mediaHandlers.onPause}
+                  onError={mediaHandlers.onError}
                 />
               </div>
             )
@@ -1785,6 +1806,7 @@ function OutlineTab({
   onOpenTurn,
   onOpenChapter,
   onOpenMark,
+  onAssignSpeakerLabel,
 }: {
   turns: TranscriptTurn[];
   focusedSegmentId: string | null;
@@ -1793,6 +1815,7 @@ function OutlineTab({
   onOpenTurn: (turn: TranscriptTurn) => void;
   onOpenChapter: (chapter: TranscriptChapter) => void;
   onOpenMark: (mark: TranscriptMark) => void;
+  onAssignSpeakerLabel: (turnId: string, label: string) => void;
 }) {
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_340px]">
@@ -1832,7 +1855,7 @@ function OutlineTab({
           </div>
         </div>
 
-        <TurnMap turns={turns} focusedSegmentId={focusedSegmentId} onOpenTurn={onOpenTurn} />
+        <TurnMap turns={turns} focusedSegmentId={focusedSegmentId} onOpenTurn={onOpenTurn} onAssignSpeakerLabel={onAssignSpeakerLabel} />
       </div>
 
       <div>
@@ -2491,6 +2514,7 @@ function TimelineOverview({
       >
         <div className="absolute inset-x-0 top-0 h-px bg-white/10" />
         <div className="absolute inset-x-0 bottom-0 h-px bg-white/10" />
+        <SpeechDensityWaveform segments={segments} duration={safeDuration} />
         {chapters.map((chapter, index) => (
           <div
             key={chapter.id}
@@ -2574,6 +2598,70 @@ function TimelineOverview({
   );
 }
 
+function SpeechDensityWaveform({
+  segments,
+  duration,
+}: {
+  segments: TranscriptSegment[];
+  duration: number;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !duration || segments.length === 0) {
+      return;
+    }
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+
+    const width = canvas.width;
+    const height = canvas.height;
+    const bucketCount = Math.min(width, 200);
+    const bucketSize = duration / bucketCount;
+    const densities = new Float32Array(bucketCount);
+
+    for (const segment of segments) {
+      const wpm = segment.end > segment.start
+        ? segment.wordCount / ((segment.end - segment.start) / 60)
+        : 0;
+      const startBucket = Math.floor(segment.start / bucketSize);
+      const endBucket = Math.min(Math.floor(segment.end / bucketSize), bucketCount - 1);
+      for (let i = startBucket; i <= endBucket; i++) {
+        densities[i] = Math.max(densities[i], wpm);
+      }
+    }
+
+    const maxDensity = Math.max(...densities, 1);
+    ctx.clearRect(0, 0, width, height);
+
+    const barWidth = width / bucketCount;
+    const midY = height / 2;
+
+    for (let i = 0; i < bucketCount; i++) {
+      const ratio = densities[i] / maxDensity;
+      const barHeight = Math.max(ratio * midY * 0.85, ratio > 0 ? 1 : 0);
+      const x = i * barWidth;
+
+      ctx.fillStyle = `rgba(95, 139, 255, ${0.15 + ratio * 0.35})`;
+      ctx.fillRect(x, midY - barHeight, barWidth - 0.5, barHeight * 2);
+    }
+  }, [segments, duration]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={400}
+      height={96}
+      className="absolute inset-0 h-full w-full"
+      style={{ imageRendering: "pixelated" }}
+    />
+  );
+}
+
 function TimelineLegend({
   colorClass,
   label,
@@ -2593,10 +2681,12 @@ function TurnMap({
   turns,
   focusedSegmentId,
   onOpenTurn,
+  onAssignSpeakerLabel,
 }: {
   turns: TranscriptTurn[];
   focusedSegmentId: string | null;
   onOpenTurn: (turn: TranscriptTurn) => void;
+  onAssignSpeakerLabel: (turnId: string, label: string) => void;
 }) {
   return (
     <div className="space-y-3">
@@ -2607,28 +2697,13 @@ function TurnMap({
       <div className="space-y-3">
         {turns.length > 0 ? (
           turns.map((turn) => (
-            <button
+            <TurnCard
               key={turn.id}
-              type="button"
-              onClick={() => onOpenTurn(turn)}
-              className={cn(
-                "w-full rounded-[24px] border px-4 py-4 text-left",
-                INTERACTIVE,
-                focusedSegmentId && turn.segmentIds.includes(focusedSegmentId)
-                  ? "border-[#1f4fff]/28 bg-[#eef2ff]"
-                  : "border-black/8 bg-white hover:border-[#1f4fff]/18 hover:bg-[#f8fbff]",
-              )}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="font-medium text-[#171a20]">Turn {turn.index + 1}</div>
-                <Badge className="border border-black/8 bg-[#f8f3e8] text-[#232730]">
-                  {formatDuration(turn.start)}-{formatDuration(turn.end)}
-                </Badge>
-              </div>
-              <div className="mt-2 text-sm text-[#585d59]">
-                {turn.segmentIds.length} segments • {turn.wordCount} words • {turn.attribution}
-              </div>
-            </button>
+              turn={turn}
+              isFocused={Boolean(focusedSegmentId && turn.segmentIds.includes(focusedSegmentId))}
+              onOpen={() => onOpenTurn(turn)}
+              onAssignSpeaker={(label) => onAssignSpeakerLabel(turn.id, label)}
+            />
           ))
         ) : (
           <EmptyPanel title="No turn map yet" body="Turns appear automatically once timestamped segments are ready." />
@@ -2638,9 +2713,108 @@ function TurnMap({
   );
 }
 
+function TurnCard({
+  turn,
+  isFocused,
+  onOpen,
+  onAssignSpeaker,
+}: {
+  turn: TranscriptTurn;
+  isFocused: boolean;
+  onOpen: () => void;
+  onAssignSpeaker: (label: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(turn.speakerLabel ?? "");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setDraft(turn.speakerLabel ?? "");
+  }, [turn.speakerLabel]);
+
+  const commitLabel = useCallback(() => {
+    const trimmed = draft.trim();
+    if (trimmed !== (turn.speakerLabel ?? "")) {
+      onAssignSpeaker(trimmed);
+    }
+    setEditing(false);
+  }, [draft, onAssignSpeaker, turn.speakerLabel]);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
+  return (
+    <div
+      className={cn(
+        "rounded-[24px] border px-4 py-4",
+        isFocused
+          ? "border-[#1f4fff]/28 bg-[#eef2ff]"
+          : "border-black/8 bg-white hover:border-[#1f4fff]/18 hover:bg-[#f8fbff]",
+      )}
+    >
+      <button
+        type="button"
+        onClick={onOpen}
+        className={cn("w-full text-left", INTERACTIVE)}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-[#171a20]">Turn {turn.index + 1}</span>
+            {turn.speakerLabel ? (
+              <Badge className="border border-[#c6d5ff] bg-[#eef2ff] text-[#1d3bb8]">
+                {turn.speakerLabel}
+              </Badge>
+            ) : null}
+          </div>
+          <Badge className="border border-black/8 bg-[#f8f3e8] text-[#232730]">
+            {formatDuration(turn.start)}-{formatDuration(turn.end)}
+          </Badge>
+        </div>
+        <div className="mt-2 text-sm text-[#585d59]">
+          {turn.segmentIds.length} segments • {turn.wordCount} words • {turn.attribution}
+        </div>
+      </button>
+      <div className="mt-3 flex items-center gap-2">
+        {editing ? (
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={commitLabel}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                commitLabel();
+              }
+              if (event.key === "Escape") {
+                setDraft(turn.speakerLabel ?? "");
+                setEditing(false);
+              }
+            }}
+            placeholder="Speaker name"
+            className="h-8 w-full max-w-[200px] rounded-xl border border-black/8 bg-white px-3 text-sm text-[#232730] outline-none focus:border-[#1f4fff]/32 focus:ring-2 focus:ring-[#1f4fff]/14"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="rounded-full border border-dashed border-black/12 px-3 py-1 text-xs text-[#6d6a61] transition hover:border-[#1f4fff]/28 hover:bg-[#eef2ff] hover:text-[#1d3bb8]"
+          >
+            {turn.speakerLabel ? `Speaker: ${turn.speakerLabel}` : "Assign speaker"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TranscriptRow({
   segment,
   marks,
+  speakerLabel,
   isFocused,
   isPlaying,
   isMatched,
@@ -2649,14 +2823,24 @@ function TranscriptRow({
 }: {
   segment: TranscriptSegment;
   marks: TranscriptMark[];
+  speakerLabel?: string;
   isFocused: boolean;
   isPlaying: boolean;
   isMatched: boolean;
   query: string;
   onSelect: () => void;
 }) {
+  const rowRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if ((isFocused || isPlaying) && rowRef.current) {
+      rowRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [isFocused, isPlaying]);
+
   return (
     <button
+      ref={rowRef}
       type="button"
       onClick={onSelect}
       className={cn(
@@ -2673,7 +2857,9 @@ function TranscriptRow({
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Badge className="border border-black/8 bg-[#f8f3e8] text-[#232730]">{formatDuration(segment.start)}</Badge>
-          <Badge className="border border-black/8 bg-white text-[#232730]">turn {segment.turnIndex + 1}</Badge>
+          <Badge className="border border-black/8 bg-white text-[#232730]">
+            {speakerLabel ? speakerLabel : `turn ${segment.turnIndex + 1}`}
+          </Badge>
           {marks.map((mark) => (
             <Badge
               key={mark.id}
