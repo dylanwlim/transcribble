@@ -95,7 +95,7 @@ export async function readBrowserStorageState(): Promise<BrowserStorageState> {
     persisted,
     usage,
     quota,
-    usageRatio: usage && quota ? usage / quota : undefined,
+    usageRatio: usage !== undefined && quota !== undefined && quota > 0 ? usage / quota : undefined,
     opfsSupported,
     preferredMediaBackend: chooseMediaStorageBackend(OPFS_MEDIA_THRESHOLD_BYTES, opfsSupported),
     caveats,

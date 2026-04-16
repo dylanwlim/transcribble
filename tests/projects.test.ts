@@ -18,6 +18,7 @@ test("createProjectFromFile creates a valid project", () => {
   assert.equal(project.mediaKind, "audio");
   assert.equal(project.runtime, "wasm");
   assert.deepEqual(project.marks, []);
+  assert.deepEqual(project.savedRanges, []);
 });
 
 test("createProjectFromFile infers video for mp4", () => {
@@ -96,5 +97,6 @@ function makeProject(overrides: Partial<TranscriptProject>): TranscriptProject {
     runtime: overrides.runtime ?? "wasm",
     fileStoreKey: overrides.fileStoreKey ?? overrides.id ?? "1",
     marks: overrides.marks ?? [],
+    savedRanges: overrides.savedRanges ?? [],
   };
 }
