@@ -16,7 +16,8 @@ const plexMono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "Transcribble",
-  description: "Private voice workspace for turning recordings into searchable, editable knowledge on this device.",
+  description:
+    "Private voice workspace for turning recordings into searchable, editable knowledge on this device.",
   manifest: "/manifest.webmanifest",
   icons: {
     icon: "/icon",
@@ -31,14 +32,29 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://transcribble.vercel.app"),
 };
 
+const themeScript = `
+(function(){try{
+  var saved=localStorage.getItem('transcribble-theme');
+  var prefersDark=window.matchMedia('(prefers-color-scheme: dark)').matches;
+  var theme=saved==='light'||saved==='dark'?saved:(prefersDark?'dark':'light');
+  if(theme==='dark'){document.documentElement.classList.add('dark');}
+}catch(_){}})();
+`.trim();
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${manrope.variable} ${plexMono.variable} font-sans antialiased`}>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
+      <body
+        className={`${manrope.variable} ${plexMono.variable} font-sans antialiased`}
+        suppressHydrationWarning
+      >
         {children}
       </body>
     </html>

@@ -14,6 +14,16 @@ const config: Config = {
       colors: {
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
+        surface: 'hsl(var(--surface))',
+        'surface-raised': 'hsl(var(--surface-raised))',
+        subtle: 'hsl(var(--subtle))',
+        'border-strong': 'hsl(var(--border-strong))',
+        record: {
+          DEFAULT: 'hsl(var(--record))',
+          soft: 'hsl(var(--record-soft))',
+        },
+        success: 'hsl(var(--success))',
+        warning: 'hsl(var(--warning))',
         card: {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',

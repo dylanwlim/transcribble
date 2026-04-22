@@ -6,9 +6,19 @@
   .text-balance {
     text-wrap: balance;
   }
-
   .text-pretty {
     text-wrap: pretty;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+  .mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .ring-focus {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
   }
 }
 
@@ -16,78 +26,176 @@
   :root {
     --font-sans: var(--font-manrope);
     --font-mono: var(--font-plex-mono);
+
     --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-spring: cubic-bezier(0.3, 1.3, 0.4, 1);
     --duration-fast: 140ms;
     --duration-medium: 220ms;
     --duration-slow: 320ms;
-    --background: 38 38% 92%;
-    --foreground: 225 17% 10%;
-    --card: 40 40% 97%;
-    --card-foreground: 225 17% 10%;
-    --popover: 40 40% 97%;
-    --popover-foreground: 225 17% 10%;
-    --primary: 223 91% 56%;
+
+    /* Light — paper neutrals */
+    --background: 40 20% 97.5%;
+    --surface: 0 0% 100%;
+    --surface-raised: 0 0% 100%;
+    --foreground: 222 14% 10%;
+    --muted: 40 12% 94%;
+    --muted-foreground: 225 6% 44%;
+    --subtle: 225 6% 58%;
+    --border: 225 14% 89%;
+    --border-strong: 225 14% 82%;
+    --input: 225 14% 89%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 14% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 14% 10%;
+    --accent: 40 12% 94%;
+    --accent-foreground: 222 14% 10%;
+    --secondary: 40 12% 94%;
+    --secondary-foreground: 222 14% 10%;
+
+    --primary: 222 88% 55%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 35 28% 91%;
-    --secondary-foreground: 225 17% 10%;
-    --muted: 35 28% 91%;
-    --muted-foreground: 36 9% 38%;
-    --accent: 35 28% 91%;
-    --accent-foreground: 225 17% 10%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 37 17% 82%;
-    --input: 37 17% 82%;
-    --ring: 223 91% 56%;
+
+    --record: 358 80% 56%;
+    --record-soft: 358 92% 96%;
+    --success: 148 55% 42%;
+    --warning: 36 90% 52%;
+    --destructive: 358 80% 56%;
+    --destructive-foreground: 0 0% 100%;
+
+    --ring: 222 88% 55%;
+    --radius: 10px;
+
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
-    --radius: 0.5rem;
-  }
-}
 
-@layer base {
+    --shadow-soft: 0 1px 2px rgba(16, 20, 28, 0.04), 0 8px 24px rgba(16, 20, 28, 0.06);
+    --shadow-float: 0 10px 36px rgba(16, 20, 28, 0.12);
+  }
+
+  .dark {
+    --background: 222 14% 7%;
+    --surface: 222 14% 9%;
+    --surface-raised: 222 14% 11%;
+    --foreground: 210 20% 96%;
+    --muted: 222 12% 13%;
+    --muted-foreground: 220 8% 64%;
+    --subtle: 220 8% 46%;
+    --border: 222 12% 18%;
+    --border-strong: 222 12% 24%;
+    --input: 222 12% 18%;
+
+    --card: 222 14% 10%;
+    --card-foreground: 210 20% 96%;
+    --popover: 222 14% 10%;
+    --popover-foreground: 210 20% 96%;
+    --accent: 222 12% 14%;
+    --accent-foreground: 210 20% 96%;
+    --secondary: 222 12% 14%;
+    --secondary-foreground: 210 20% 96%;
+
+    --primary: 218 92% 66%;
+    --primary-foreground: 222 14% 7%;
+
+    --record: 358 82% 62%;
+    --record-soft: 358 40% 16%;
+    --success: 148 50% 52%;
+    --warning: 36 85% 60%;
+    --destructive: 358 82% 62%;
+    --destructive-foreground: 222 14% 7%;
+
+    --ring: 218 92% 66%;
+
+    --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 28px rgba(0, 0, 0, 0.4);
+    --shadow-float: 0 14px 40px rgba(0, 0, 0, 0.55);
+  }
+
   * {
-    @apply border-border;
+    border-color: hsl(var(--border));
   }
 
   html {
     @apply scroll-smooth;
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
   }
 
   body {
-    @apply bg-background font-sans text-foreground antialiased;
-    background-image:
-      radial-gradient(circle at top left, rgba(31, 79, 255, 0.08), transparent 32%),
-      radial-gradient(circle at bottom right, rgba(28, 33, 42, 0.08), transparent 26%);
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system, "SF Pro Text",
+      "Helvetica Neue", sans-serif;
     min-height: 100vh;
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 
   ::selection {
-    background-color: rgba(31, 79, 255, 0.2);
-    color: rgb(17 20 27);
+    background-color: hsl(var(--primary) / 0.22);
+    color: hsl(var(--foreground));
   }
 
+  /* Native-style tight scrollbars that fade in on hover */
+  .scroll-y {
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+    transition: scrollbar-color var(--duration-medium) var(--ease-standard);
+  }
+  .scroll-y:hover,
+  .scroll-y:focus-within {
+    scrollbar-color: hsl(var(--border-strong)) transparent;
+  }
+  .scroll-y::-webkit-scrollbar {
+    width: 10px;
+  }
+  .scroll-y::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: padding-box;
+  }
+  .scroll-y:hover::-webkit-scrollbar-thumb,
+  .scroll-y:focus-within::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border-strong));
+  }
+
+  @keyframes pulse-record {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes rise-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes sheet-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.985); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
   @keyframes progress-sheen {
-    0% {
-      transform: translateX(-140%);
-    }
-
-    100% {
-      transform: translateX(220%);
-    }
+    0% { transform: translateX(-140%); }
+    100% { transform: translateX(220%); }
   }
+
+  .animate-fade-in { animation: fade-in var(--duration-medium) var(--ease-standard); }
+  .animate-rise-in { animation: rise-in var(--duration-medium) var(--ease-standard); }
+  .animate-sheet-in { animation: sheet-in var(--duration-medium) var(--ease-standard); }
+  .animate-pulse-record { animation: pulse-record 1.4s ease-in-out infinite; }
 
   @media (prefers-reduced-motion: reduce) {
-    html {
-      scroll-behavior: auto;
-    }
-
-    *,
-    *::before,
-    *::after {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
