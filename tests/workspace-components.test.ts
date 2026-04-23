@@ -14,6 +14,7 @@ import {
 import { EmptyState } from "@/components/workspace/empty-state";
 import { SettingsSheet } from "@/components/workspace/settings-sheet";
 import { Sidebar } from "@/components/workspace/sidebar";
+import { shouldRenderTurnHeader } from "@/components/workspace/transcript-pane";
 
 test("sidebar renders setup as a real button with the shared settings label", () => {
   const html = renderToStaticMarkup(
@@ -50,6 +51,7 @@ test("sidebar renders setup as a real button with the shared settings label", ()
   assert.match(html, />Setup</);
   assert.match(html, /202 MB used/);
   assert.match(html, /2\.0 GB available/);
+  assert.match(html, /Browser tools ready/);
 });
 
 test("settings sheet renders the local workspace dialog heading", () => {
@@ -118,4 +120,20 @@ test("empty state copy keeps the local-first em dash copy", () => {
 
   assert.ok(html.includes(EMPTY_STATE_COPY));
   assert.doesNotMatch(html, /here - searchable/);
+});
+
+test("turn headers stay hidden until a speaker label exists", () => {
+  assert.equal(
+    shouldRenderTurnHeader({
+      speakerLabel: undefined,
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldRenderTurnHeader({
+      speakerLabel: "Speaker A",
+    }),
+    true,
+  );
 });

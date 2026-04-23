@@ -375,6 +375,19 @@ test("fetchLocalHelperCapabilities detects a reachable helper and helper job syn
   assert.equal(synced.resumeState?.completedChunks, 2);
 });
 
+test("fetchLocalHelperCapabilities normalizes raw browser fetch failures into localhost guidance", async () => {
+  globalThis.fetch = async () => {
+    throw new Error("Failed to fetch");
+  };
+
+  const capabilities = await fetchLocalHelperCapabilities();
+
+  assert.equal(capabilities.available, false);
+  assert.doesNotMatch(capabilities.reason ?? "", /^Failed to fetch$/i);
+  assert.match(capabilities.reason ?? "", /localhost/i);
+  assert.match(capabilities.nextAction ?? "", /helper:check/i);
+});
+
 test("readLocalHelperJob retries a transient helper 500 before failing", async (t) => {
   let attempts = 0;
   const server = http.createServer((request, response) => {

@@ -1229,10 +1229,20 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(raw_body.decode("utf-8"))
 
     def _write_headers(self) -> None:
+        origin = self.headers.get("origin")
+        vary_headers: list[str] = []
+
         self.send_header("content-type", "application/json; charset=utf-8")
-        self.send_header("access-control-allow-origin", "*")
+        self.send_header("access-control-allow-origin", origin or "*")
         self.send_header("access-control-allow-methods", "GET,POST,PUT,OPTIONS")
         self.send_header("access-control-allow-headers", "content-type,x-transcribble-source-name")
+        if origin:
+            vary_headers.append("Origin")
+        if self.headers.get("access-control-request-private-network", "").lower() == "true":
+            self.send_header("access-control-allow-private-network", "true")
+            vary_headers.append("Access-Control-Request-Private-Network")
+        if vary_headers:
+            self.send_header("vary", ", ".join(vary_headers))
         self.send_header("cache-control", "no-store")
 
     def _send_json(self, status: int, payload: dict[str, Any]) -> None:

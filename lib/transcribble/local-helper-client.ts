@@ -17,6 +17,7 @@ import type {
 const DEFAULT_TIMEOUT_MS = 1_500;
 const HELPER_ENDPOINTS = [LOCAL_ACCELERATOR_ENDPOINT, LOCAL_ACCELERATOR_FALLBACK_ENDPOINT];
 const JOB_READ_RETRY_DELAYS_MS = [250, 750];
+const LOCALHOST_HELPER_UNAVAILABLE_MESSAGE = "Could not reach the Transcribble Helper on localhost.";
 
 export interface CreateLocalHelperJobRequest {
   jobId: string;
@@ -60,12 +61,43 @@ function getUnavailableCapabilities(reason: string): LocalHelperCapabilities {
     reason,
     nextAction:
       `Run ${LOCAL_ACCELERATOR_CHECK_COMMAND} in this repo to diagnose whether ffmpeg, ffprobe, the helper virtualenv, or the localhost service is missing. ` +
-      `If the helper is not installed yet, run ${LOCAL_ACCELERATOR_INSTALL_COMMAND}, then ${LOCAL_ACCELERATOR_START_COMMAND}, then ${LOCAL_ACCELERATOR_CHECK_COMMAND} again.`,
+      `If the helper is not installed yet, run ${LOCAL_ACCELERATOR_INSTALL_COMMAND}, then ${LOCAL_ACCELERATOR_START_COMMAND}, then ${LOCAL_ACCELERATOR_CHECK_COMMAND} again. ` +
+      "If the browser asks whether this site can reach localhost, allow it and refresh.",
   };
 }
 
 function sleep(ms: number) {
   return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
+}
+
+function describeLocalHelperConnectionFailure(error: unknown) {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return "Timed out while waiting for the Transcribble Helper on localhost.";
+  }
+
+  const message = error instanceof Error ? error.message.trim() : "";
+  const lower = message.toLowerCase();
+
+  if (
+    !message ||
+    lower === "failed to fetch" ||
+    lower.includes("fetch failed") ||
+    lower.includes("load failed") ||
+    lower.includes("networkerror") ||
+    lower.includes("network request failed")
+  ) {
+    const secureHint =
+      typeof window !== "undefined" && window.location.protocol === "https:"
+        ? " If your browser asks whether this site can reach localhost, allow it and refresh."
+        : "";
+    return `${LOCALHOST_HELPER_UNAVAILABLE_MESSAGE}${secureHint}`;
+  }
+
+  if (lower.includes("health check failed") || lower.includes("capabilities request failed")) {
+    return "The Transcribble Helper responded on localhost, but it did not complete its health check.";
+  }
+
+  return message;
 }
 
 export async function connectToLocalHelper(timeoutMs = DEFAULT_TIMEOUT_MS): Promise<LocalHelperConnection> {
@@ -107,7 +139,7 @@ export async function connectToLocalHelper(timeoutMs = DEFAULT_TIMEOUT_MS): Prom
         },
       };
     } catch (error) {
-      lastError = error instanceof Error ? error : new Error("Local helper connection failed.");
+      lastError = new Error(describeLocalHelperConnectionFailure(error) || "Local helper connection failed.");
     }
   }
 
@@ -119,10 +151,7 @@ export async function fetchLocalHelperCapabilities(timeoutMs = DEFAULT_TIMEOUT_M
     const connection = await connectToLocalHelper(timeoutMs);
     return connection.capabilities;
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Transcribble Helper was not reachable on localhost.";
+    const message = describeLocalHelperConnectionFailure(error) || LOCALHOST_HELPER_UNAVAILABLE_MESSAGE;
     return getUnavailableCapabilities(message);
   }
 }

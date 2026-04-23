@@ -77,21 +77,28 @@ function highlightText(text: string, query: string) {
   }
 }
 
+export function shouldRenderTurnHeader(turn: Pick<TranscriptTurn, "speakerLabel">) {
+  return Boolean(turn.speakerLabel?.trim());
+}
+
 function TurnHeader({ turn }: { turn: TranscriptTurn }) {
-  const label = turn.speakerLabel ?? null;
+  if (!shouldRenderTurnHeader(turn)) {
+    return null;
+  }
+
+  const label = turn.speakerLabel!.trim();
+
   return (
-    <div className="flex items-baseline gap-3 pt-6 first:pt-0">
+    <div className="flex items-center gap-3 pb-1 pt-5 first:pt-0">
       <div className="w-14 text-right">
         <span className="text-[11px] text-subtle tabular mono">
           {formatDuration(turn.start)}
         </span>
       </div>
-      <div className="flex-1">
-        {label ? (
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            {label}
-          </div>
-        ) : null}
+      <div className="min-w-0 flex-1">
+        <div className="inline-flex items-center rounded-full border border-border/70 bg-muted/40 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+          {label}
+        </div>
       </div>
     </div>
   );
@@ -152,7 +159,7 @@ function SegmentRow({
   const isEdited = Boolean(segment.originalText) && segment.originalText !== segment.text;
 
   return (
-    <div className="group flex items-start gap-3 py-1">
+    <div className="group flex items-start gap-3 py-1.5">
       <button
         type="button"
         onClick={() => onSelect(true)}
@@ -169,10 +176,10 @@ function SegmentRow({
 
       <div
         className={cn(
-          "relative min-w-0 flex-1 rounded-md px-3 py-1.5 -mx-3",
+          "relative min-w-0 flex-1 overflow-hidden rounded-xl border border-transparent px-3 py-2",
           "transition-colors duration-150",
-          isFocused && "bg-muted/70",
-          isPlaying && "bg-primary/5 ring-1 ring-inset ring-primary/20",
+          isFocused && "border-primary/20 bg-muted/70",
+          isPlaying && "border-primary/20 bg-primary/5 ring-1 ring-inset ring-primary/20",
           isMatched && !isPlaying && "bg-primary/[0.04]",
         )}
       >
@@ -218,9 +225,9 @@ function SegmentRow({
             onClick={() => onSelect(true)}
             onDoubleClick={() => canEdit && setEditing(true)}
             className={cn(
-              "block w-full text-left text-[15px] leading-7",
+              "block w-full break-words rounded text-left text-[15px] leading-7",
               "text-foreground/90 transition-colors duration-150",
-              "hover:text-foreground ring-focus rounded",
+              "hover:text-foreground ring-focus",
             )}
           >
             {highlightText(segment.text, transcriptQuery)}
@@ -228,13 +235,16 @@ function SegmentRow({
         )}
 
         {(hasBookmark || hasReview || isEdited) && !editing ? (
-          <div className="mt-1 flex items-center gap-2">
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             {hasBookmark ? (
-              <Bookmark className="h-3 w-3 fill-current text-primary opacity-60" />
+              <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                <Bookmark className="h-2.5 w-2.5 fill-current text-primary" />
+                Saved
+              </span>
             ) : null}
             {hasReview ? (
-              <span className="text-[10px] uppercase tracking-wider text-warning opacity-60">
-                Review
+              <span className="inline-flex items-center rounded-full border border-warning/20 bg-warning/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-warning">
+                Needs review
               </span>
             ) : null}
             {isEdited ? (
@@ -245,7 +255,7 @@ function SegmentRow({
                   onRevert?.();
                 }}
                 title={`Original: ${segment.originalText}`}
-                className="inline-flex items-center gap-1 rounded-full border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-subtle hover:bg-muted hover:text-foreground ring-focus"
+                className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-subtle hover:bg-muted hover:text-foreground ring-focus"
               >
                 <RotateCcw className="h-2.5 w-2.5" />
                 Edited · Undo
@@ -426,7 +436,7 @@ export function TranscriptPane({
   return (
     <div className="flex h-full flex-col">
       {canSearch ? (
-        <div className="sticky top-0 z-10 -mx-1 mb-2 flex items-center gap-1 border-b border-border bg-background/95 px-1 py-2 backdrop-blur">
+        <div className="sticky top-0 z-10 mb-3 flex items-center gap-1 border-b border-border bg-background/95 py-2 backdrop-blur">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-subtle" />
             <input
@@ -518,15 +528,15 @@ export function TranscriptPane({
 
       <div
         ref={containerRef}
-        className="scroll-y flex-1 pb-24"
+        className="scroll-y flex-1 overflow-x-hidden pb-24"
         aria-label="Transcript"
       >
         {hasSegments ? (
-          <div className="space-y-0.5">
+          <div className="space-y-5">
             {grouped.map(({ turn, segments: bucket }) => (
-              <div key={turn.id}>
+              <div key={turn.id} className="space-y-1">
                 <TurnHeader turn={turn} />
-                <div className="space-y-0">
+                <div className="space-y-0.5">
                   {bucket.map((segment) => (
                     <div key={segment.id} data-segment-id={segment.id}>
                       <SegmentRow

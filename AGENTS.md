@@ -24,6 +24,7 @@ Do not assume:
 - The helper may not be installed or running on a given machine. If a job needs it, keep the file local and say that the local accelerator is required.
 - Helper lifecycle commands are `npm run helper:install`, `npm run helper:start`, and `npm run helper:check`.
 - `npm run helper:check` is the diagnostic entrypoint. It should report whether `ffmpeg`, `ffprobe`, the helper venv/backend, or the running localhost service is missing.
+- Helper connectivity from the public HTTPS app must stay friendly: the helper should answer secure-browser localhost preflights/permission checks cleanly, and UI copy must not leak raw fetch strings like `Failed to fetch`.
 - Import validation is quota-aware. Do not reintroduce a fixed file-size cap or “upload” language for local recording imports.
 - Speaker turns are currently pause-derived. `speakerLabel`, `manual`, and `diarized` are future seams, not a finished speaker workflow.
 - Export is transcript-focused (`txt`, `md`, `srt`, `vtt`). Whole-workspace backup/import is still missing.

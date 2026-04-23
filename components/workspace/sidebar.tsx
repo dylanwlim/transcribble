@@ -474,14 +474,17 @@ export function Sidebar({
   );
 
   const storageSummary = buildStorageStatus(storageUsedBytes, storageAvailableBytes);
-  const allReady = modelReady && mediaReady;
+  const browserToolsReady = modelReady && mediaReady;
+  const allReady = browserToolsReady && helperAvailable;
   const setupStatusTitle = allReady
     ? online
-      ? "Local tools ready"
-      : "Local tools ready offline"
-    : online
-      ? "One-time setup needed"
-      : "Go online once for setup";
+      ? "All local tools ready"
+      : "All local tools ready offline"
+    : browserToolsReady
+      ? "Browser tools ready"
+      : online
+        ? "One-time setup needed"
+        : "Go online once for setup";
 
   return (
     <aside className={cn("flex h-full min-h-0 w-full flex-col border-r border-border bg-surface", className)}>
