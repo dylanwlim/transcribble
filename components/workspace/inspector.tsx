@@ -13,7 +13,7 @@ import {
   Video,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import React, { type ReactNode, useState } from "react";
 
 import { cn } from "@/lib/utils";
 import { formatBytes, formatDuration } from "@/lib/transcribble/transcript";
@@ -247,7 +247,7 @@ function Section({
 }: {
   title: string;
   icon?: typeof Sparkles;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   const [open, setOpen] = useState(true);
   return (

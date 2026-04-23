@@ -401,7 +401,7 @@ export function TranscribbleApp() {
                 onRevertSegment={revertSegmentText}
               />
 
-              {inspectorOpen && selectedProjectView?.canUseTranscript ? (
+              {inspectorOpen ? (
                 <Inspector
                   project={selectedProject}
                   marks={currentProjectMarks}

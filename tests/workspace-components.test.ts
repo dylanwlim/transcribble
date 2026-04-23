@@ -12,6 +12,7 @@ import {
   SETTINGS_MODAL_TITLE,
 } from "@/lib/transcribble/constants";
 import { EmptyState } from "@/components/workspace/empty-state";
+import { Inspector } from "@/components/workspace/inspector";
 import { SettingsSheet } from "@/components/workspace/settings-sheet";
 import { Sidebar } from "@/components/workspace/sidebar";
 import { TranscriptPane } from "@/components/workspace/transcript-pane";
@@ -185,4 +186,46 @@ test("transcript pane surfaces local-accelerator-required guidance instead of a 
   assert.match(html, /Local accelerator required/);
   assert.match(html, /Transcribble Helper running on this machine/);
   assert.doesNotMatch(html, /No transcript yet\./);
+});
+
+test("inspector still renders base session details before a transcript exists", () => {
+  const html = renderToStaticMarkup(
+    createElement(Inspector, {
+      project: {
+        id: "paused-project",
+        title: "April planning",
+        sourceName: "April planning.m4a",
+        sourceType: "audio/mp4",
+        sourceSize: 18 * 1024 * 1024,
+        mediaKind: "audio",
+        createdAt: new Date("2026-04-23T18:05:00Z").toISOString(),
+        updatedAt: new Date("2026-04-23T18:05:00Z").toISOString(),
+        status: "paused",
+        step: "needs-local-helper",
+        progress: 0,
+        stageLabel: "Local accelerator required",
+        detail:
+          "Large recordings need the Transcribble Helper running on this machine before transcription can continue.",
+        runtime: "wasm",
+        backend: "local-helper",
+        fileStoreKey: "paused-project",
+        marks: [],
+        savedRanges: [],
+      },
+      marks: [],
+      ranges: [],
+      onClose: () => undefined,
+      onJumpToSegment: () => undefined,
+      onJumpToTime: () => undefined,
+      onRemoveRange: () => undefined,
+      onToggleHighlight: () => undefined,
+      onExport: () => undefined,
+    }),
+  );
+
+  assert.match(html, />Details</);
+  assert.match(html, />About</);
+  assert.match(html, /April planning\.m4a/);
+  assert.match(html, />Size</);
+  assert.doesNotMatch(html, /Open export/);
 });
