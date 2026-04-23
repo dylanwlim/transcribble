@@ -28,7 +28,7 @@ Transcribble now handles large imports honestly:
 - long or memory-risk recordings route to the local accelerator
 - if the helper is not running, the app keeps the source file locally and says that the local accelerator is required instead of pretending the browser will continue
 
-The guaranteed path for a 1.1 GB meeting video is the local accelerator, not `decodeAudioData()`, `AudioBuffer`, or `ffmpeg.wasm`.
+The guaranteed path for a 1.1 GB meeting `.mp4` is the local accelerator, not `decodeAudioData()`, `AudioBuffer`, or `ffmpeg.wasm`.
 
 ## Transcribble Helper
 
@@ -50,6 +50,7 @@ It:
 - fails clearly when no usable audio stream exists
 - extracts mono 16 kHz speech audio with native `ffmpeg`
 - chunks long recordings with overlap
+- shows explicit helper-side model download progress while the first local model is being prepared
 - persists job state locally so refreshes and helper restarts can resume
 - prefers MLX Whisper on Apple Silicon when available, otherwise uses `faster-whisper`
 
@@ -58,6 +59,7 @@ It:
 1. Install native `ffmpeg` and `ffprobe`.
 2. Run `npm run helper:install`.
 3. Run `npm run helper:start`.
+4. Run `npm run helper:check`.
 
 Helper state is stored under `~/.transcribble-helper` by default.
 
@@ -106,12 +108,13 @@ npm run build
 - [lib/transcribble/transcription-backends.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/transcription-backends.ts): browser vs local-helper routing
 - [lib/transcribble/local-helper-client.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/local-helper-client.ts): localhost helper client
 - [lib/transcribble/local-helper-state.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/local-helper-state.ts): helper job to project-state mapping
+- [scripts/helper-check.mjs](/Users/dylan/Projects/Dev/transcribble/scripts/helper-check.mjs): helper health and capability check
 - [lib/transcribble/workspace-db.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/workspace-db.ts): IndexedDB and OPFS-backed storage adapter
 - [helper/transcribble_helper.py](/Users/dylan/Projects/Dev/transcribble/helper/transcribble_helper.py): local accelerator service
 
 ## Known Limits
 
-- Browser mode is intentionally conservative and should not be treated as “supports any video.”
+- Browser mode is intentionally conservative and should not be treated as “supports any FFmpeg-decodable media.”
 - The helper requires local Python plus native `ffmpeg` / `ffprobe`.
 - Speaker turns in the app stay pause-derived unless a future local diarization pass is enabled.
 - Optional alignment and diarization controls are exposed as helper settings, but the default helper build does not bundle those heavier local dependencies yet.

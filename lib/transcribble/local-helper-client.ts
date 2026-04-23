@@ -54,6 +54,7 @@ function getUnavailableCapabilities(reason: string): LocalHelperCapabilities {
     url: LOCAL_ACCELERATOR_ENDPOINT,
     models: [],
     reason,
+    nextAction: "Install ffmpeg and ffprobe, then run npm run helper:install, npm run helper:start, and npm run helper:check.",
   };
 }
 

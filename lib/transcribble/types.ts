@@ -20,6 +20,7 @@ export type ProjectStep =
   | "uploading"
   | "queued"
   | "needs-local-helper"
+  | "getting-local-model"
   | "getting-browser-ready"
   | "getting-recording-ready"
   | "probing"
@@ -34,36 +35,16 @@ export type ProjectStep =
   | "canceled";
 
 export type MediaKind = "audio" | "video";
-export type TranscriptionBackend = "browser" | "local-helper" | "external";
+export type TranscriptionBackend = "browser" | "local-helper";
 export type LegacyTranscriptionRoute = "local" | "cloud";
 export type TranscriptionRoute = TranscriptionBackend | LegacyTranscriptionRoute;
-export type CloudStorageProvider = "local" | "vercel-blob";
-export type CloudTranscriptionMode = "standard" | "diarized" | "word-timestamps";
-export type CloudTranscriptionJobStatus =
-  | "pending_upload"
-  | "uploading"
-  | "queued"
-  | "extracting_audio"
-  | "chunking"
-  | "transcribing"
-  | "merging"
-  | "completed"
-  | "failed"
-  | "canceled";
-
-export interface CloudTranscriptionCapabilities {
-  enabled: boolean;
-  provider: CloudStorageProvider;
-  mode: CloudTranscriptionMode;
-  maxUploadBytes: number;
-  reason?: string;
-}
 
 export type HelperModelProfile = "fast" | "accurate";
 export type LocalHelperJobStatus =
   | "pending_upload"
   | "uploading"
   | "queued"
+  | "downloading_model"
   | "probing"
   | "extracting_audio"
   | "chunking"
@@ -85,6 +66,7 @@ export interface LocalHelperModelAvailability {
 export interface LocalHelperCapabilities {
   available: boolean;
   url: string;
+  protocolVersion?: string;
   version?: string;
   platform?: string;
   backend?: string;
@@ -97,13 +79,14 @@ export interface LocalHelperCapabilities {
   cacheBytes?: number;
   models: LocalHelperModelAvailability[];
   reason?: string;
+  nextAction?: string;
 }
 
 export interface LocalHelperResumeState {
   totalChunks?: number;
   completedChunks?: number;
   completedChunkIndexes?: number[];
-  nextChunkIndex?: number;
+  nextChunkIndex?: number | null;
 }
 
 export interface LocalHelperFailure {
@@ -124,11 +107,13 @@ export interface LocalHelperJob {
   detail: string;
   createdAt: string;
   updatedAt: string;
+  protocolVersion?: string;
   durationSec?: number;
   backend?: string;
   backendLabel?: string;
   modelProfile: HelperModelProfile;
   modelName?: string;
+  modelDownloadBytes?: number;
   totalChunks?: number;
   completedChunks?: number;
   sourceUploaded?: boolean;
@@ -149,9 +134,17 @@ export type EntityKind = "person" | "organization" | "product" | "term";
 
 export type TurnAttribution = "pause-derived" | "manual" | "diarized";
 
+export interface TranscriptWord {
+  text: string;
+  start: number;
+  end: number;
+  confidence?: number;
+}
+
 export interface TranscriptChunk {
   text: string;
   timestamp: [number, number | null];
+  words?: TranscriptWord[];
   speakerLabel?: string;
   attribution?: TurnAttribution;
 }
@@ -339,66 +332,6 @@ export interface TranscriptDocument {
   envelope?: number[];
 }
 
-export interface CloudSourceAsset {
-  pathname: string;
-  provider: CloudStorageProvider;
-  filename: string;
-  contentType: string;
-  size: number;
-  uploadedAt: string;
-  url?: string;
-}
-
-export interface CloudChunkArtifact {
-  chunkIndex: number;
-  startMs: number;
-  endMs: number;
-  primaryStartMs: number;
-  primaryEndMs: number;
-  overlapMs: number;
-  byteSize: number;
-  durationSec: number;
-  pathname: string;
-  provider: CloudStorageProvider;
-  createdAt: string;
-  url?: string;
-}
-
-export interface CloudTranscriptionFailure {
-  code: string;
-  message: string;
-  retryable: boolean;
-}
-
-export interface CloudTranscriptionJob {
-  id: string;
-  projectId: string;
-  sessionId: string;
-  sourceName: string;
-  sourceType: string;
-  sourceSize: number;
-  mediaKind: MediaKind;
-  provider: CloudStorageProvider;
-  mode: CloudTranscriptionMode;
-  status: CloudTranscriptionJobStatus;
-  progress: number;
-  detail: string;
-  createdAt: string;
-  updatedAt: string;
-  attempts: number;
-  durationSec?: number;
-  source?: CloudSourceAsset;
-  chunks: CloudChunkArtifact[];
-  totalChunks?: number;
-  completedChunks?: number;
-  transcript?: TranscriptPayload;
-  transcriptPath?: string;
-  workflowRunId?: string;
-  error?: CloudTranscriptionFailure;
-  completedAt?: string;
-  canceledAt?: string;
-}
-
 export interface TranscriptProject {
   id: string;
   title: string;
@@ -424,10 +357,6 @@ export interface TranscriptProject {
   transcriptionModelName?: string;
   resumeState?: LocalHelperResumeState;
   transcriptionRoute?: TranscriptionRoute;
-  cloudJobId?: string;
-  cloudProvider?: CloudStorageProvider;
-  cloudStatus?: CloudTranscriptionJobStatus;
-  cloudLastSyncedAt?: string;
   duration?: number;
   fileStoreKey: string;
   transcript?: TranscriptDocument;

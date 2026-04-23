@@ -269,6 +269,19 @@ function normalizePhraseHints(value: string) {
     .filter(Boolean);
 }
 
+function isLocalHelperConnectionFailure(message: string) {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("failed to fetch") ||
+    lower.includes("networkerror") ||
+    lower.includes("network request failed") ||
+    lower.includes("local helper") ||
+    lower.includes("localhost") ||
+    lower.includes("connection refused") ||
+    lower.includes("could not upload the recording to the local helper")
+  );
+}
+
 export function useTranscribble() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const mediaRef = useRef<HTMLAudioElement | HTMLVideoElement | null>(null);
@@ -430,8 +443,7 @@ export function useTranscribble() {
       projects.filter(
         (project) =>
           project.status === "queued" &&
-          project.backend !== "local-helper" &&
-          project.backend !== "external",
+          project.backend !== "local-helper",
       ),
     [projects],
   );
@@ -573,19 +585,26 @@ export function useTranscribble() {
     [applyProjectUpdate, finishJob],
   );
 
-  const pauseProjectAfterImport = useCallback(
-    (projectId: string, message: string, step: "paused" | "needs-local-helper" = "paused") => {
+  const markProjectNeedsLocalHelper = useCallback(
+    (projectId: string, message: string) => {
       applyProjectUpdate(
         projectId,
         (project) =>
-          applyProjectStep(project, {
-            status: "paused",
-            step,
-            progress: 0,
-            detail: message,
-            error: undefined,
-          }),
-        { persist: true },
+          applyProjectStep(
+            {
+              ...project,
+              backend: "local-helper",
+              transcriptionRoute: "local-helper",
+            },
+            {
+              status: "paused",
+              step: "needs-local-helper",
+              progress: 0,
+              detail: message,
+              error: undefined,
+            },
+          ),
+        { persist: true, select: true },
       );
       setNotice({
         tone: "error",
@@ -626,7 +645,7 @@ export function useTranscribble() {
         const fallbackMessage = buildLocalHelperRequiredDetail(
           options?.reason ?? helperCapabilities?.reason ?? "Transcribble Helper was not reachable on localhost.",
         );
-        pauseProjectAfterImport(projectId, fallbackMessage, "needs-local-helper");
+        markProjectNeedsLocalHelper(projectId, fallbackMessage);
         return;
       }
 
@@ -721,6 +740,14 @@ export function useTranscribble() {
         const message =
           error instanceof Error ? error.message : "Could not start the local accelerator for this recording.";
 
+        if (isLocalHelperConnectionFailure(message)) {
+          markProjectNeedsLocalHelper(
+            projectId,
+            buildLocalHelperRequiredDetail(message),
+          );
+          return;
+        }
+
         applyProjectUpdate(
           projectId,
           (project) =>
@@ -760,7 +787,7 @@ export function useTranscribble() {
       helperPreferences.enableDiarization,
       helperPreferences.modelProfile,
       helperPreferences.phraseHints,
-      pauseProjectAfterImport,
+      markProjectNeedsLocalHelper,
       syncHelperJobIntoProject,
     ],
   );
@@ -989,15 +1016,14 @@ export function useTranscribble() {
 
         if (projectId) {
           const currentProject = projectsRef.current.find((project) => project.id === projectId);
-          if (
-            isMemoryError &&
-            currentProject?.backend !== "local-helper"
-          ) {
+          if (currentProject?.backend !== "local-helper") {
             finishJob();
             void startHelperTranscriptionForProject(projectId, undefined, {
               browserFailure: true,
               reason:
-                "The browser ran out of memory locally, so Transcribble is retrying this recording with the local accelerator.",
+                isMemoryError
+                  ? "The browser ran out of memory locally, so Transcribble is retrying this recording with the local accelerator."
+                  : "The browser could not finish this recording locally, so Transcribble is retrying it with the local accelerator.",
             });
             return;
           }
@@ -1128,6 +1154,8 @@ export function useTranscribble() {
           return;
         }
 
+        const message = humanizePreparationError(error);
+
         if (error instanceof LocalPreparationRiskError) {
           finishJob();
           await startHelperTranscriptionForProject(project.id, file, {
@@ -1137,7 +1165,14 @@ export function useTranscribble() {
           return;
         }
 
-        finishProjectWithError(project.id, humanizePreparationError(error));
+        finishJob();
+        await startHelperTranscriptionForProject(project.id, file, {
+          reason:
+            message.includes("local accelerator")
+              ? message
+              : "The browser could not finish preparing this recording locally, so Transcribble is retrying it with the local accelerator.",
+          browserFailure: true,
+        });
       }
     },
     [

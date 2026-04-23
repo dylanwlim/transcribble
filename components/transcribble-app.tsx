@@ -136,6 +136,9 @@ export function TranscribbleApp() {
   const helperSummary = helperAvailable
     ? "Reachable on localhost. Large and long recordings route here by default."
     : helperCapabilities?.reason ?? "Large recordings need the local accelerator running on this machine.";
+  const helperNextAction =
+    helperCapabilities?.nextAction ??
+    "Install ffmpeg and ffprobe, then run the helper install, start, and check commands in this repo.";
   const helperCacheLabel =
     typeof helperCapabilities?.cacheBytes === "number"
       ? `${formatBytes(helperCapabilities.cacheBytes)} cached locally`
@@ -505,6 +508,7 @@ export function TranscribbleApp() {
         onInstall={promptInstall}
         helperAvailable={helperAvailable}
         helperSummary={helperSummary}
+        helperNextAction={helperNextAction}
         helperUrl={helperCapabilities?.url ?? "http://127.0.0.1:7771"}
         helperBackendLabel={helperCapabilities?.backendLabel ?? helperCapabilities?.backend}
         helperCacheLabel={helperCacheLabel}

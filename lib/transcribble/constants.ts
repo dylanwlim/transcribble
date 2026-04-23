@@ -33,6 +33,9 @@ export const LOCAL_ACCELERATOR_REQUIRED_NOTE =
   "Large or memory-heavy recordings need the Transcribble Helper running on this machine. Open Settings for the install and start steps, then retry.";
 export const LOCAL_ACCELERATOR_ENDPOINT = "http://127.0.0.1:7771";
 export const LOCAL_ACCELERATOR_FALLBACK_ENDPOINT = "http://localhost:7771";
+export const LOCAL_ACCELERATOR_INSTALL_COMMAND = "npm run helper:install";
+export const LOCAL_ACCELERATOR_START_COMMAND = "npm run helper:start";
+export const LOCAL_ACCELERATOR_CHECK_COMMAND = "npm run helper:check";
 
 export const ADD_RECORDING_LABEL = "Add recording";
 export const ADD_RECORDING_HELPER = "Add a recording to begin.";
@@ -42,7 +45,7 @@ export const SETTINGS_OPEN_LABEL = "Open setup and settings";
 export const SETTINGS_SECTION_LABEL = "Settings";
 export const SETTINGS_MODAL_TITLE = "Local workspace";
 export const EMPTY_STATE_COPY =
-  "Bring in audio or video. Browser mode stays convenient for smaller, safer recordings. The local accelerator is the default path for long or large media and keeps the work on this machine.";
+  "Bring in audio or other supported FFmpeg-decodable media. Browser mode stays convenient for smaller, safer recordings. The local accelerator is the default path for long or large media and keeps the work on this machine.";
 export const SETTINGS_PRIVACY_COPY =
   "Browser mode keeps recordings on this device for shorter jobs. The local accelerator also runs on this machine and is the default path for long or memory-heavy recordings.";
 export const UNSUPPORTED_FILE_TYPE_MESSAGE = `Unsupported file type. Use ${formatList(

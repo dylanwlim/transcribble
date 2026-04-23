@@ -78,6 +78,16 @@ export function mergeLocalHelperTranscriptChunks(chunks: LocalHelperChunkTranscr
       const nextChunk: TranscriptChunk = {
         text: normalizeSpacing(entry.text),
         timestamp: [entry.startMs / 1_000, entry.endMs === null ? null : entry.endMs / 1_000],
+        words: entry.words?.length
+          ? entry.words
+              .map((word) => ({
+                ...word,
+                text: normalizeSpacing(word.text),
+                start: chunk.startMs / 1_000 + word.start,
+                end: chunk.startMs / 1_000 + word.end,
+              }))
+              .filter((word) => Boolean(word.text))
+          : undefined,
         speakerLabel: entry.speakerLabel,
         attribution: entry.attribution,
       };

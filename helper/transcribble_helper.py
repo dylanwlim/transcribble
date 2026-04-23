@@ -10,14 +10,14 @@ import subprocess
 import sys
 import threading
 import time
-import traceback
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import unquote, urlparse
 
 HELPER_VERSION = "0.1.0"
+HELPER_PROTOCOL_VERSION = "1"
 HELPER_HOST = os.environ.get("TRANSCRIBBLE_HELPER_HOST", "127.0.0.1")
 HELPER_PORT = int(os.environ.get("TRANSCRIBBLE_HELPER_PORT", "7771"))
 HELPER_ROOT = Path(
@@ -33,6 +33,7 @@ DEFAULT_SAMPLE_RATE = 16_000
 DEFAULT_CHUNK_SEC = 8 * 60
 MIN_CHUNK_SEC = 90
 CHUNK_OVERLAP_SEC = 2
+MODEL_DOWNLOAD_POLL_INTERVAL_SEC = 0.5
 
 os.environ.setdefault("HF_HOME", str(HF_CACHE_DIR))
 
@@ -66,6 +67,18 @@ def file_size(path: Path) -> int:
 
 def normalize_spacing(text: str) -> str:
     return " ".join((text or "").split())
+
+
+def format_bytes(value: int) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    size = float(max(0, value))
+    unit = units[0]
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            break
+        size /= 1024
+    precision = 0 if unit in {"B", "KB"} else 1
+    return f"{size:.{precision}f} {unit}"
 
 
 def has_module(name: str) -> bool:
@@ -113,6 +126,54 @@ def helper_available() -> bool:
     return bool(ffmpeg_path() and ffprobe_path() and preferred_backend())
 
 
+def helper_next_action(backend: str | None) -> str | None:
+    if not ffmpeg_path() or not ffprobe_path():
+        return "Install native ffmpeg and ffprobe, then run npm run helper:check."
+    if not backend:
+        return "Run npm run helper:install, then npm run helper:start."
+    return "Run npm run helper:start if the helper is not already running."
+
+
+def model_display_name(profile: str, backend: str | None) -> str:
+    if backend == "mlx-whisper":
+        return mlx_model_name(profile)
+    if backend == "faster-whisper":
+        return faster_model_name(profile)
+    return faster_model_name(profile)
+
+
+def model_cache_markers(profile: str, backend: str | None) -> list[str]:
+    if backend == "mlx-whisper":
+        repo_name = mlx_model_name(profile).replace("/", "--")
+        return [repo_name, f"models--{repo_name}"]
+    if backend == "faster-whisper":
+        model_name = faster_model_name(profile)
+        return [model_name, f"models--Systran--{model_name}"]
+    return []
+
+
+def model_cache_paths(profile: str, backend: str | None) -> list[Path]:
+    if backend == "stub":
+        return []
+
+    matches: dict[str, Path] = {}
+    for root in [MODELS_DIR, HF_CACHE_DIR]:
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_dir():
+                continue
+            if any(marker in path.name for marker in model_cache_markers(profile, backend)):
+                matches[str(path.resolve())] = path
+
+    if backend == "faster-whisper":
+        direct_root = MODELS_DIR / "faster-whisper" / faster_model_name(profile)
+        if direct_root.exists():
+            matches[str(direct_root.resolve())] = direct_root
+
+    return list(matches.values())
+
+
 def capabilities_payload() -> dict[str, Any]:
     backend = preferred_backend()
     available = helper_available()
@@ -120,7 +181,7 @@ def capabilities_payload() -> dict[str, Any]:
         {
             "profile": "fast",
             "label": "Fast mode",
-            "modelName": "distil-large-v3",
+            "modelName": model_display_name("fast", backend),
             "downloaded": model_downloaded("fast", backend),
             "diskUsageBytes": model_disk_usage("fast", backend),
             "recommended": True,
@@ -128,7 +189,7 @@ def capabilities_payload() -> dict[str, Any]:
         {
             "profile": "accurate",
             "label": "Accuracy mode",
-            "modelName": "large-v3",
+            "modelName": model_display_name("accurate", backend),
             "downloaded": model_downloaded("accurate", backend),
             "diskUsageBytes": model_disk_usage("accurate", backend),
         },
@@ -144,6 +205,7 @@ def capabilities_payload() -> dict[str, Any]:
     return {
         "available": available,
         "url": f"http://{HELPER_HOST}:{HELPER_PORT}",
+        "protocolVersion": HELPER_PROTOCOL_VERSION,
         "version": HELPER_VERSION,
         "platform": f"{platform.system()} {platform.machine()}",
         "backend": backend,
@@ -156,6 +218,7 @@ def capabilities_payload() -> dict[str, Any]:
         "cacheBytes": file_size(MODELS_DIR) + file_size(HF_CACHE_DIR),
         "models": models,
         "reason": reason,
+        "nextAction": helper_next_action(backend),
     }
 
 
@@ -184,20 +247,18 @@ def model_root(profile: str, backend: str | None) -> Path:
 
 
 def model_downloaded(profile: str, backend: str | None) -> bool:
-    if backend == "faster-whisper":
-        return file_size(model_root(profile, backend)) > 0
     if backend == "stub":
         return True
-    return False
+    return any(file_size(path) > 0 for path in model_cache_paths(profile, backend))
 
 
 def model_disk_usage(profile: str, backend: str | None) -> int | None:
-    if backend == "faster-whisper":
-        root = model_root(profile, backend)
-        return file_size(root) if root.exists() else 0
     if backend == "stub":
         return 0
-    return None
+    paths = model_cache_paths(profile, backend)
+    if not paths:
+        return 0
+    return sum(file_size(path) for path in paths)
 
 
 def compute_device() -> tuple[str, str]:
@@ -281,6 +342,16 @@ def merge_chunk_payloads(chunk_results: list[dict[str, Any]]) -> dict[str, Any]:
             next_chunk = {
                 "text": normalize_spacing(entry.get("text", "")),
                 "timestamp": [start_ms / 1000, None if end_ms is None else end_ms / 1000],
+                "words": [
+                    {
+                        "text": normalize_spacing(word.get("text", "")),
+                        "start": chunk["startMs"] / 1000 + float(word.get("start", 0)),
+                        "end": chunk["startMs"] / 1000 + float(word.get("end", 0)),
+                        "confidence": word.get("confidence"),
+                    }
+                    for word in (entry.get("words") or [])
+                    if normalize_spacing(word.get("text", ""))
+                ],
                 "speakerLabel": entry.get("speakerLabel"),
                 "attribution": entry.get("attribution"),
             }
@@ -361,6 +432,7 @@ class JobStore:
                 "sourceType": payload["sourceType"],
                 "sourceSize": payload["sourceSize"],
                 "mediaKind": payload["mediaKind"],
+                "protocolVersion": HELPER_PROTOCOL_VERSION,
                 "status": "pending_upload",
                 "progress": 0,
                 "detail": "Saved on this device. Waiting for the local accelerator source file.",
@@ -370,6 +442,7 @@ class JobStore:
                 "backendLabel": backend_label(preferred_backend()),
                 "modelProfile": payload.get("modelProfile", "fast"),
                 "modelName": None,
+                "modelDownloadBytes": 0,
                 "phraseHints": payload.get("phraseHints") or [],
                 "enableAlignment": bool(payload.get("enableAlignment")),
                 "enableDiarization": bool(payload.get("enableDiarization")),
@@ -463,6 +536,7 @@ class JobStore:
                 continue
             if job.get("status") in {
                 "queued",
+                "downloading_model",
                 "probing",
                 "extracting_audio",
                 "chunking",
@@ -518,6 +592,12 @@ class JobStore:
         audio_stream_index, duration_sec = assert_usable_audio_stream(probe)
 
         plans = plan_chunks(duration_sec)
+        self.update_job_status(
+            job_id,
+            "chunking",
+            18,
+            f"Planning {len(plans)} local chunk{'s' if len(plans) != 1 else ''} with overlap.",
+        )
         self.update(
             job_id,
             lambda current: {
@@ -547,6 +627,7 @@ class JobStore:
             )
             chunk_path = chunks_dir / f"chunk-{plan.chunk_index:04d}.wav"
             extract_chunk(source_path, chunk_path, audio_stream_index, plan)
+            self._raise_if_canceled(job_id)
 
             self.update_job_status(
                 job_id,
@@ -555,10 +636,12 @@ class JobStore:
                 f"Transcribing chunk {index + 1} of {len(plans)} locally.",
             )
             payload, backend, model_name = transcribe_chunk(
+                job_id,
                 chunk_path,
                 self.load(job_id).get("modelProfile", "fast"),
                 self.load(job_id).get("phraseHints") or [],
             )
+            self._raise_if_canceled(job_id)
             try:
                 chunk_path.unlink(missing_ok=True)
             except OSError:
@@ -633,6 +716,109 @@ class JobStore:
             raise HelperError("job_canceled", "The local accelerator job was canceled.", False)
 
 
+def track_model_download(
+    job_id: str,
+    profile: str,
+    backend: str,
+    action: Callable[[], Any],
+) -> Any:
+    if model_downloaded(profile, backend):
+        return action()
+
+    model_label = "fast" if profile == "fast" else "accurate"
+    stop_event = threading.Event()
+
+    def update_download_status() -> None:
+        downloaded_bytes = model_disk_usage(profile, backend) or 0
+        current_job = STORE.load(job_id)
+        if current_job.get("cancelRequested") or current_job.get("status") == "canceled":
+            stop_event.set()
+            return
+        STORE.update(
+            job_id,
+            lambda job: {
+                **job,
+                "status": "downloading_model",
+                "progress": max(20, int(job.get("progress") or 0)),
+                "detail": (
+                    f"Downloading the {model_label} local model on this machine. "
+                    f"{format_bytes(downloaded_bytes)} cached locally so far."
+                ),
+                "modelDownloadBytes": downloaded_bytes,
+            },
+        )
+
+    def poll_download() -> None:
+        last_bytes = -1
+        while not stop_event.wait(MODEL_DOWNLOAD_POLL_INTERVAL_SEC):
+            downloaded_bytes = model_disk_usage(profile, backend) or 0
+            if downloaded_bytes == last_bytes:
+                continue
+            last_bytes = downloaded_bytes
+            try:
+                update_download_status()
+            except FileNotFoundError:
+                return
+
+    update_download_status()
+    poller = threading.Thread(target=poll_download, daemon=True)
+    poller.start()
+
+    try:
+        return action()
+    finally:
+        stop_event.set()
+        poller.join(timeout=1)
+        try:
+            downloaded_bytes = model_disk_usage(profile, backend) or 0
+            STORE.update(
+                job_id,
+                lambda job: {
+                    **job,
+                    "modelDownloadBytes": downloaded_bytes,
+                },
+            )
+        except FileNotFoundError:
+            pass
+
+
+def humanize_media_command_failure(stderr: str, fallback: str) -> str:
+    message = (stderr or "").strip()
+    lower = message.lower()
+
+    if "moov atom not found" in lower or "invalid data found" in lower or "end of file" in lower:
+        return "This recording looks corrupt or incomplete, so the local accelerator could not read it."
+
+    if "no such file or directory" in lower:
+        return "The local accelerator could not reopen the saved source file."
+
+    return message or fallback
+
+
+def validate_job_create_payload(payload: dict[str, Any]) -> None:
+    required_fields = [
+        "jobId",
+        "projectId",
+        "sourceName",
+        "sourceType",
+        "sourceSize",
+        "mediaKind",
+    ]
+    missing_fields = [field for field in required_fields if not payload.get(field)]
+    if missing_fields:
+        raise HelperError(
+            "invalid_job_payload",
+            f"Missing helper job field{'s' if len(missing_fields) != 1 else ''}: {', '.join(missing_fields)}.",
+            False,
+        )
+
+    if payload.get("mediaKind") not in {"audio", "video"}:
+        raise HelperError("invalid_media_kind", "mediaKind must be audio or video.", False)
+
+    if payload.get("modelProfile") not in {None, "fast", "accurate"}:
+        raise HelperError("invalid_model_profile", "modelProfile must be fast or accurate.", False)
+
+
 def run_ffprobe(source_path: Path) -> dict[str, Any]:
     probe_binary = ffprobe_path()
     if not probe_binary:
@@ -654,7 +840,11 @@ def run_ffprobe(source_path: Path) -> dict[str, Any]:
         text=True,
     )
     if result.returncode != 0:
-        raise HelperError("ffprobe_failed", result.stderr.strip() or "ffprobe failed.", False)
+        raise HelperError(
+            "ffprobe_failed",
+            humanize_media_command_failure(result.stderr, "ffprobe could not read this recording."),
+            False,
+        )
     return json.loads(result.stdout)
 
 
@@ -697,25 +887,60 @@ def extract_chunk(source_path: Path, output_path: Path, audio_stream_index: int,
 
     result = subprocess.run(command, check=False, capture_output=True, text=True)
     if result.returncode != 0:
-        raise HelperError("ffmpeg_extract_failed", result.stderr.strip() or "ffmpeg failed to extract audio.", True)
+        raise HelperError(
+            "ffmpeg_extract_failed",
+            humanize_media_command_failure(
+                result.stderr,
+                "ffmpeg could not extract speech audio from this recording.",
+            ),
+            True,
+        )
 
 
 _MODEL_CACHE: dict[tuple[str, str], Any] = {}
 
 
-def transcribe_chunk(chunk_path: Path, profile: str, phrase_hints: list[str]) -> tuple[dict[str, Any], str, str]:
+def transcribe_chunk(
+    job_id: str,
+    chunk_path: Path,
+    profile: str,
+    phrase_hints: list[str],
+) -> tuple[dict[str, Any], str, str]:
     backend = preferred_backend()
     if backend == "stub":
         return stub_transcription(chunk_path), "stub", "stub-local-model"
     if backend == "mlx-whisper":
         try:
-            return transcribe_with_mlx(chunk_path, profile), "mlx-whisper", mlx_model_name(profile)
+            return track_model_download(
+                job_id,
+                profile,
+                "mlx-whisper",
+                lambda: (transcribe_with_mlx(chunk_path, profile), "mlx-whisper", mlx_model_name(profile)),
+            )
         except Exception:
             if "faster-whisper" in available_backends():
-                return transcribe_with_faster_whisper(chunk_path, profile, phrase_hints), "faster-whisper", faster_model_name(profile)
+                return track_model_download(
+                    job_id,
+                    profile,
+                    "faster-whisper",
+                    lambda: (
+                        transcribe_with_faster_whisper(chunk_path, profile, phrase_hints),
+                        "faster-whisper",
+                        faster_model_name(profile),
+                    ),
+                )
             raise
     if backend == "faster-whisper":
-        return transcribe_with_faster_whisper(chunk_path, profile, phrase_hints), "faster-whisper", faster_model_name(profile)
+        return track_model_download(
+            job_id,
+            profile,
+            "faster-whisper",
+            lambda: (
+                transcribe_with_faster_whisper(chunk_path, profile, phrase_hints),
+                "faster-whisper",
+                faster_model_name(profile),
+            ),
+        )
     raise HelperError("backend_missing", "No supported local Whisper backend was available.", False)
 
 
@@ -750,6 +975,16 @@ def transcribe_with_faster_whisper(chunk_path: Path, profile: str, phrase_hints:
             {
                 "text": normalize_spacing(segment.text),
                 "timestamp": [float(segment.start), float(segment.end)],
+                "words": [
+                    {
+                        "text": normalize_spacing(getattr(word, "word", "")),
+                        "start": float(getattr(word, "start", 0)),
+                        "end": float(getattr(word, "end", 0)),
+                        "confidence": getattr(word, "probability", None),
+                    }
+                    for word in (getattr(segment, "words", None) or [])
+                    if normalize_spacing(getattr(word, "word", ""))
+                ],
             }
             for segment in segment_list
             if normalize_spacing(segment.text)
@@ -773,6 +1008,16 @@ def transcribe_with_mlx(chunk_path: Path, profile: str) -> dict[str, Any]:
             {
                 "text": normalize_spacing(segment.get("text", "")),
                 "timestamp": [float(segment.get("start", 0)), float(segment.get("end", 0))],
+                "words": [
+                    {
+                        "text": normalize_spacing(word.get("word", "")),
+                        "start": float(word.get("start", 0)),
+                        "end": float(word.get("end", 0)),
+                        "confidence": word.get("probability"),
+                    }
+                    for word in (segment.get("words") or [])
+                    if normalize_spacing(word.get("word", ""))
+                ],
             }
             for segment in segments
             if normalize_spacing(segment.get("text", ""))
@@ -814,6 +1059,7 @@ class Handler(BaseHTTPRequestHandler):
                     200,
                     {
                         "ok": True,
+                        "protocolVersion": HELPER_PROTOCOL_VERSION,
                         "version": HELPER_VERSION,
                         "available": helper_available(),
                         "backend": preferred_backend(),
@@ -841,6 +1087,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/jobs":
                 payload = self._read_json()
+                validate_job_create_payload(payload)
                 job = STORE.create(payload)
                 self._send_json(200, {"job": job})
                 return
@@ -867,7 +1114,7 @@ class Handler(BaseHTTPRequestHandler):
                 },
             )
         except Exception as exc:  # pragma: no cover - defensive surface
-            self._send_json(500, {"error": str(exc), "trace": traceback.format_exc()})
+            self._send_json(500, {"error": str(exc)})
 
     def do_PUT(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
@@ -885,7 +1132,7 @@ class Handler(BaseHTTPRequestHandler):
         except HelperError as exc:
             self._send_json(400, {"error": str(exc), "code": exc.code})
         except Exception as exc:  # pragma: no cover - defensive surface
-            self._send_json(500, {"error": str(exc), "trace": traceback.format_exc()})
+            self._send_json(500, {"error": str(exc)})
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
         return

@@ -5,6 +5,9 @@ import React, { useEffect, useId, useRef } from "react";
 
 import {
   IMPORT_FILE_LABEL,
+  LOCAL_ACCELERATOR_CHECK_COMMAND,
+  LOCAL_ACCELERATOR_INSTALL_COMMAND,
+  LOCAL_ACCELERATOR_START_COMMAND,
   SETTINGS_MODAL_TITLE,
   SETTINGS_PRIVACY_COPY,
   SETTINGS_SECTION_LABEL,
@@ -36,6 +39,7 @@ interface SettingsSheetProps {
   onInstall: () => void | Promise<void>;
   helperAvailable: boolean;
   helperSummary: string;
+  helperNextAction?: string;
   helperUrl: string;
   helperBackendLabel?: string;
   helperCacheLabel: string;
@@ -77,6 +81,7 @@ export function SettingsSheet({
   onInstall,
   helperAvailable,
   helperSummary,
+  helperNextAction,
   helperUrl,
   helperBackendLabel,
   helperCacheLabel,
@@ -332,6 +337,30 @@ export function SettingsSheet({
               ready={helperAvailable}
             />
 
+            {!helperAvailable ? (
+              <div className="rounded-xl border border-border/80 bg-surface/70 px-3 py-3">
+                <div className="text-[13px] font-medium text-foreground">Install, start, and check</div>
+                <div className="mt-0.5 text-[11px] leading-5 text-muted-foreground">
+                  {helperNextAction ??
+                    "Install ffmpeg and ffprobe first, then install and start the local helper in this repo."}
+                </div>
+                <div className="mt-3 space-y-2 text-[11px] leading-5 text-muted-foreground">
+                  <CommandStep
+                    label="Install Python dependencies"
+                    command={LOCAL_ACCELERATOR_INSTALL_COMMAND}
+                  />
+                  <CommandStep
+                    label="Start the localhost helper"
+                    command={LOCAL_ACCELERATOR_START_COMMAND}
+                  />
+                  <CommandStep
+                    label="Check localhost health and capabilities"
+                    command={LOCAL_ACCELERATOR_CHECK_COMMAND}
+                  />
+                </div>
+              </div>
+            ) : null}
+
             <div className="rounded-xl border border-border/80 bg-surface/70 px-3 py-3">
               <label className="block text-[13px] font-medium text-foreground" htmlFor={`${titleId}-helper-model`}>
                 Model profile
@@ -516,6 +545,21 @@ function ActionButton({
     >
       {children}
     </button>
+  );
+}
+
+function CommandStep({
+  label,
+  command,
+}: {
+  label: string;
+  command: string;
+}) {
+  return (
+    <div className="rounded-lg border border-border/70 bg-background/60 px-3 py-2">
+      <div className="font-medium text-foreground">{label}</div>
+      <code className="mt-0.5 block text-[11px] text-muted-foreground">{command}</code>
+    </div>
   );
 }
 

@@ -21,7 +21,8 @@ function findPython() {
     return candidate;
   }
 
-  return process.platform === "win32" ? "python" : "python3";
+  console.error("Transcribble Helper is not installed yet. Run `npm run helper:install` first.");
+  process.exit(1);
 }
 
 const child = spawn(

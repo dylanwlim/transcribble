@@ -59,6 +59,14 @@ export function syncLocalHelperJobIntoProject(project: TranscriptProject, job: L
         detail: job.detail,
         error: undefined,
       });
+    case "downloading_model":
+      return applyProjectStep(baseProject, {
+        status: "preparing",
+        step: "getting-local-model",
+        progress: Math.max(18, job.progress),
+        detail: job.detail,
+        error: undefined,
+      });
     case "probing":
       return applyProjectStep(baseProject, {
         status: "preparing",

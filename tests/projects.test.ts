@@ -74,6 +74,27 @@ test("recoverPersistedProjects keeps error and paused projects", () => {
   assert.equal(recovered[1].status, "paused");
 });
 
+test("recoverPersistedProjects migrates removed cloud-route sessions into local-helper retry state", () => {
+  const recovered = recoverPersistedProjects([
+    {
+      ...makeProject({
+        id: "legacy-cloud",
+        status: "queued",
+        stageLabel: "Queued",
+        detail: "Waiting for the removed cloud workflow.",
+      }),
+      transcriptionRoute: "cloud",
+      cloudJobId: "old-job-1",
+      cloudStatus: "queued",
+    } as TranscriptProject & { cloudJobId: string; cloudStatus: string },
+  ]);
+
+  assert.equal(recovered[0].backend, "local-helper");
+  assert.equal(recovered[0].step, "needs-local-helper");
+  assert.equal(recovered[0].status, "paused");
+  assert.match(recovered[0].detail, /older build that used the removed cloud path/i);
+});
+
 test("updateProjectTimestamp updates the updatedAt field", () => {
   const project = makeProject({});
   const before = project.updatedAt;

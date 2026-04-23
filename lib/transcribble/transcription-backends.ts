@@ -185,8 +185,6 @@ export function getBackendLabel(backend?: TranscriptionBackend) {
   switch (backend) {
     case "local-helper":
       return "Local accelerator";
-    case "external":
-      return "External provider";
     case "browser":
     default:
       return "Browser transcription";

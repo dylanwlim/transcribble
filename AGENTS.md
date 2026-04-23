@@ -19,9 +19,10 @@ Repo truth:
 - Tests live in `tests/*.test.ts`.
 
 Do not assume:
-- Browser mode is only for smaller, safer recordings. Do not claim browser-only support for arbitrary long or large video.
+- Browser mode is only for smaller, safer recordings. Do not claim browser-only support for arbitrary long or large FFmpeg-decodable media.
 - The default architecture is zero-dollar and local-first. Do not reintroduce any default dependency on OpenAI, Vercel Blob, Vercel Workflows, or another usage-billed backend.
 - The helper may not be installed or running on a given machine. If a job needs it, keep the file local and say that the local accelerator is required.
+- Helper lifecycle commands are `npm run helper:install`, `npm run helper:start`, and `npm run helper:check`.
 - Import validation is quota-aware. Do not reintroduce a fixed file-size cap or “upload” language for local recording imports.
 - Speaker turns are currently pause-derived. `speakerLabel`, `manual`, and `diarized` are future seams, not a finished speaker workflow.
 - Export is transcript-focused (`txt`, `md`, `srt`, `vtt`). Whole-workspace backup/import is still missing.
@@ -34,4 +35,4 @@ Validation:
 - Broad sweep: `npm run validate`.
 
 Maintenance rule:
-- After meaningful architecture, command, validation, or deployment changes, update `AGENTS.md`, `CLAUDE.md`, `README.md`, and any hardcoded public metadata in the same change.
+- After meaningful architecture, workflow, environment, script, validation, or deployment changes, update `AGENTS.md`, `CLAUDE.md`, `README.md`, and any hardcoded public metadata in the same change.

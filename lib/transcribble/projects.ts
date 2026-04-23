@@ -13,6 +13,17 @@ import type {
   TranscriptionRoute,
 } from "@/lib/transcribble/types";
 
+interface LegacyPersistedProjectFields {
+  backend?: unknown;
+  transcriptionRoute?: unknown;
+  cloudJobId?: string;
+  cloudProvider?: string;
+  cloudStatus?: string;
+  cloudLastSyncedAt?: string;
+}
+
+type PersistedProjectRecord = TranscriptProject & LegacyPersistedProjectFields;
+
 function inferMediaKind(file: File): MediaKind {
   const extension = getFileExtension(file.name);
   if (extension === ".mp4" || extension === ".mov") {
@@ -36,11 +47,9 @@ export function createProjectFromImportedFile(
   file: File,
   runtime: Runtime,
   backend: TranscriptionBackend,
-  backendProvider?: string,
 ): TranscriptProject {
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
-  const usesRemoteBackend = backend === "external";
   const usesLocalHelper = backend === "local-helper";
 
   return {
@@ -52,14 +61,13 @@ export function createProjectFromImportedFile(
     mediaKind: inferMediaKind(file),
     createdAt: now,
     updatedAt: now,
-    status: usesLocalHelper || usesRemoteBackend ? "pending-upload" : "queued",
-    step: usesLocalHelper || usesRemoteBackend ? "pending-upload" : "queued",
+    status: usesLocalHelper ? "pending-upload" : "queued",
+    step: usesLocalHelper ? "pending-upload" : "queued",
     progress: 0,
-    stageLabel: usesLocalHelper || usesRemoteBackend ? "Waiting to send" : "Waiting to start",
+    stageLabel: usesLocalHelper ? "Waiting to send" : "Waiting to start",
     detail: usesLocalHelper ? LOCAL_ACCELERATOR_NOTE : LOCAL_PROCESSING_NOTE,
     runtime,
     backend,
-    backendProvider,
     transcriptionRoute: backend,
     fileStoreKey: id,
     marks: [],
@@ -67,8 +75,8 @@ export function createProjectFromImportedFile(
   };
 }
 
-function normalizeProject(project: TranscriptProject): TranscriptProject {
-  const route = project.backend ?? normalizeLegacyRoute(project.transcriptionRoute);
+function normalizeProject(project: PersistedProjectRecord): TranscriptProject {
+  const route = normalizeLegacyRoute(project.backend ?? project.transcriptionRoute);
 
   return {
     ...project,
@@ -93,7 +101,8 @@ function normalizeProject(project: TranscriptProject): TranscriptProject {
 
 export function recoverPersistedProjects(projects: TranscriptProject[]) {
   return projects.map((project) => {
-    const normalizedProject = normalizeProject(project);
+    const rawProject = project as PersistedProjectRecord;
+    const normalizedProject = normalizeProject(rawProject);
     const backend = normalizedProject.backend ?? "browser";
 
     if (
@@ -103,13 +112,11 @@ export function recoverPersistedProjects(projects: TranscriptProject[]) {
       project.status === "canceled" ||
       (backend === "local-helper" && Boolean(normalizedProject.backendJobId))
     ) {
-      if (
-        normalizeLegacyRoute(project.transcriptionRoute) === "local-helper" &&
-        !project.backend &&
-        project.status !== "ready"
-      ) {
+      if (cameFromRemovedRemotePath(rawProject) && project.status !== "ready") {
         return {
           ...normalizedProject,
+          backend: "local-helper" as const,
+          transcriptionRoute: "local-helper" as const,
           status: "paused" as const,
           step: "needs-local-helper" as const,
           progress: 0,
@@ -145,18 +152,30 @@ export function updateProjectTimestamp<T extends TranscriptProject>(project: T):
   };
 }
 
-function normalizeLegacyRoute(route?: TranscriptionRoute): TranscriptionBackend | undefined {
+function normalizeLegacyRoute(route?: TranscriptionRoute | "external"): TranscriptionBackend | undefined {
   if (route === "local") {
     return "browser";
   }
 
-  if (route === "cloud") {
+  if (route === "cloud" || route === "external") {
     return "local-helper";
   }
 
-  if (route === "browser" || route === "local-helper" || route === "external") {
+  if (route === "browser" || route === "local-helper") {
     return route;
   }
 
   return undefined;
+}
+
+function cameFromRemovedRemotePath(project: PersistedProjectRecord) {
+  const legacyBackend = project["backend"] as unknown;
+  const legacyRoute = project["transcriptionRoute"] as unknown;
+
+  return (
+    legacyBackend === "external" ||
+    legacyRoute === "external" ||
+    legacyRoute === "cloud" ||
+    Boolean(project.cloudJobId)
+  );
 }

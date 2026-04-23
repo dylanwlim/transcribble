@@ -3,6 +3,8 @@
 # dependencies
 /node_modules
 /helper/.venv
+__pycache__/
+*.pyc
 
 # next.js
 /.next/

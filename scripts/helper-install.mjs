@@ -37,6 +37,10 @@ function run(command, args) {
   }
 }
 
+function hasBinary(command) {
+  return spawnSync(command, ["-version"], { stdio: "ignore" }).status === 0;
+}
+
 const python = findPython();
 
 if (!existsSync(venvPython())) {
@@ -45,3 +49,9 @@ if (!existsSync(venvPython())) {
 
 run(venvPython(), ["-m", "pip", "install", "--upgrade", "pip"]);
 run(venvPython(), ["-m", "pip", "install", "-r", path.join(helperDir, "requirements.txt")]);
+
+if (!hasBinary("ffmpeg") || !hasBinary("ffprobe")) {
+  console.warn(
+    "Transcribble Helper Python dependencies are installed, but ffmpeg/ffprobe were not found. Install those native tools before running `npm run helper:check`.",
+  );
+}

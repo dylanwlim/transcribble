@@ -52,6 +52,40 @@ test("chooseTranscriptionBackend routes a 1.1 GB mp4 to the local helper", () =>
   assert.match(decision.reason, /local accelerator/i);
 });
 
+test("chooseTranscriptionBackend requires the helper after one failed browser attempt", () => {
+  const decision = chooseTranscriptionBackend(
+    new File(["hello"], "retry.m4a", {
+      type: "audio/mp4",
+    }),
+    {
+      browserLocalAvailable: true,
+      helperAvailable: true,
+      previousBrowserFailure: true,
+      deviceMemoryGb: 16,
+      hardwareConcurrency: 8,
+    },
+  );
+
+  assert.equal(decision.backend, "local-helper");
+  assert.match(decision.reason, /failed once in browser mode/i);
+});
+
+test("chooseTranscriptionBackend pauses on helper-required media when the helper is missing", () => {
+  const decision = chooseTranscriptionBackend(
+    makeSizedFile("archive.mp4", "video/mp4", 1.1 * 1024 * 1024 * 1024),
+    {
+      browserLocalAvailable: true,
+      helperAvailable: false,
+      deviceMemoryGb: 8,
+      hardwareConcurrency: 4,
+    },
+  );
+
+  assert.equal(decision.backend, "local-helper");
+  assert.equal(decision.requiresHelperInstall, true);
+  assert.match(decision.reason, /Transcribble Helper running on this machine/i);
+});
+
 test("planLocalHelperChunks splits long recordings with overlap", () => {
   const chunks = planLocalHelperChunks({
     durationSec: 7_200,
@@ -73,7 +107,11 @@ test("mergeLocalHelperTranscriptChunks offsets later chunks and drops overlap du
       payload: {
         text: "Hello boundary",
         chunks: [
-          { text: "Hello", timestamp: [0, 2] },
+          {
+            text: "Hello",
+            timestamp: [0, 2],
+            words: [{ text: "Hello", start: 0, end: 0.4, confidence: 0.9 }],
+          },
           { text: "Boundary", timestamp: [8, 10] },
         ],
       },
@@ -99,6 +137,8 @@ test("mergeLocalHelperTranscriptChunks offsets later chunks and drops overlap du
     ["Hello", "Boundary", "World"],
   );
   assert.equal(merged.chunks?.[2]?.timestamp[0], 11.5);
+  assert.equal(merged.chunks?.[0]?.words?.[0]?.start, 0);
+  assert.equal(merged.chunks?.[0]?.words?.[0]?.end, 0.4);
 });
 
 test("assertUsableAudioStream fails clearly when the media has no audio", () => {
@@ -137,6 +177,33 @@ test("recoverPersistedProjects keeps local-helper jobs available for reconnect a
   assert.equal(projectNeedsHelperReconnect(recovered[0] as TranscriptProject), true);
 });
 
+test("syncLocalHelperJobIntoProject maps model download progress into a helper-specific project step", () => {
+  const project = createProjectFromImportedFile(
+    new File(["x"], "meeting.mp4", { type: "video/mp4" }),
+    "wasm",
+    "local-helper",
+  );
+  const synced = syncLocalHelperJobIntoProject(project, {
+    id: "job-1",
+    projectId: project.id,
+    sourceName: "meeting.mp4",
+    sourceType: "video/mp4",
+    sourceSize: 1.1 * 1024 * 1024 * 1024,
+    mediaKind: "video",
+    status: "downloading_model",
+    progress: 21,
+    detail: "Downloading the fast local model on this machine. 640 MB cached locally so far.",
+    createdAt: "2026-04-23T12:00:00Z",
+    updatedAt: "2026-04-23T12:00:02Z",
+    modelProfile: "fast",
+    modelDownloadBytes: 640 * 1024 * 1024,
+  });
+
+  assert.equal(synced.status, "preparing");
+  assert.equal(synced.step, "getting-local-model");
+  assert.match(synced.detail, /640 MB cached locally/i);
+});
+
 test("fetchLocalHelperCapabilities detects a reachable helper and helper job sync survives multiple chunks", async (t) => {
   const baseJob: LocalHelperJob = {
     id: "job-1",
@@ -172,7 +239,7 @@ test("fetchLocalHelperCapabilities detects a reachable helper and helper job syn
     }
 
     if (request.method === "GET" && url === "/health") {
-      response.end(JSON.stringify({ ok: true, version: "test" }));
+      response.end(JSON.stringify({ ok: true, protocolVersion: "1", version: "test" }));
       return;
     }
 
@@ -181,6 +248,7 @@ test("fetchLocalHelperCapabilities detects a reachable helper and helper job syn
         JSON.stringify({
           available: true,
           url: "http://127.0.0.1:7771",
+          protocolVersion: "1",
           backend: "stub",
           backendLabel: "Stub backend",
           ffmpegReady: true,
@@ -190,6 +258,7 @@ test("fetchLocalHelperCapabilities detects a reachable helper and helper job syn
           supportsDiarization: false,
           cacheBytes: 0,
           models: [],
+          nextAction: "Run npm run helper:start if the helper is not already running.",
         }),
       );
       return;
@@ -273,6 +342,7 @@ test("fetchLocalHelperCapabilities detects a reachable helper and helper job syn
 
   const capabilities = await fetchLocalHelperCapabilities();
   assert.equal(capabilities.available, true);
+  assert.equal(capabilities.protocolVersion, "1");
 
   const created = await createLocalHelperJob(helperBaseUrl, {
     jobId: "job-1",

@@ -5,6 +5,7 @@
   "scripts": {
     "build": "next build",
     "dev": "next dev",
+    "helper:check": "node scripts/helper-check.mjs",
     "helper:install": "node scripts/helper-install.mjs",
     "helper:start": "node scripts/helper-start.mjs",
     "lint": "eslint .",

@@ -35,6 +35,12 @@ const STAGE_COPY: Record<ProjectStep, StageCopy> = {
       "This recording is saved on this device, but it needs the Transcribble Helper running on this machine before transcription can continue.",
     tone: "warning",
   },
+  "getting-local-model": {
+    badgeLabel: "Model",
+    headline: "Getting the local model ready",
+    summary: "Downloading or loading the local model on this machine before transcription starts.",
+    tone: "working",
+  },
   "getting-browser-ready": {
     badgeLabel: "Setup",
     headline: "Getting this browser ready",
@@ -278,6 +284,20 @@ export function getProjectViewState(
       transcriptBadgeLabel: "Browser setup in progress",
       transcriptSearchPlaceholder: "Search unlocks after the transcript is ready",
       transcriptEmptyTitle: "Getting this browser ready",
+      transcriptEmptyBody: status.summary,
+    };
+  }
+
+  if (status.step === "getting-local-model") {
+    return {
+      ...status,
+      canUseTranscript: false,
+      canSearchTranscript: false,
+      canExport: false,
+      canSaveRanges: false,
+      transcriptBadgeLabel: "Getting the local model ready",
+      transcriptSearchPlaceholder: "Search unlocks after the transcript is ready",
+      transcriptEmptyTitle: "Getting the local model ready",
       transcriptEmptyBody: status.summary,
     };
   }
