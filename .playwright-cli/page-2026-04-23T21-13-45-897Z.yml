@@ -1,0 +1,124 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e4]:
+      - generic [ref=e6]:
+        - img [ref=e8]
+        - generic [ref=e13]: Transcribble
+      - generic [ref=e15]:
+        - img
+        - searchbox "Search library" [ref=e16]
+        - generic:
+          - generic: ⌘
+          - generic: K
+      - generic [ref=e17]:
+        - button "Add recording" [ref=e18] [cursor=pointer]:
+          - img [ref=e19]
+          - generic [ref=e22]: Add recording
+          - generic [ref=e23]:
+            - generic [ref=e24]: ⌘
+            - generic [ref=e25]: O
+        - button "Record from microphone" [ref=e26] [cursor=pointer]:
+          - img [ref=e27]
+      - generic [ref=e32]:
+        - generic [ref=e116]:
+          - generic [ref=e117]: Working
+          - option "Getting the local model ready March 3 Meeting 5:13 PM · 1:55:38 Getting the local model ready Session actions" [selected] [ref=e119]:
+            - button "Getting the local model ready March 3 Meeting 5:13 PM · 1:55:38 Getting the local model ready" [ref=e120] [cursor=pointer]:
+              - generic [ref=e121]:
+                - generic "Getting the local model ready" [ref=e122]
+                - generic [ref=e123]:
+                  - generic [ref=e125]: March 3 Meeting
+                  - generic [ref=e126]:
+                    - generic [ref=e127]: 5:13 PM
+                    - generic [ref=e128]: ·
+                    - generic [ref=e129]: 1:55:38
+                    - img [ref=e130]
+              - generic [ref=e136]: Getting the local model ready
+            - button "Session actions" [ref=e137] [cursor=pointer]:
+              - img [ref=e138]
+        - generic [ref=e33]:
+          - generic [ref=e34]: Library
+          - generic [ref=e35]: Add a recording to begin.
+      - generic [ref=e36]:
+        - generic [ref=e37]:
+          - generic [ref=e39]:
+            - img [ref=e40]
+            - generic [ref=e42]:
+              - generic [ref=e43]: 1.1 GB used
+              - generic [ref=e101]: 2.7 GB available
+              - generic [ref=e102]:
+                - img [ref=e103]
+                - generic [ref=e105]: Browser may clear files if storage gets tight
+          - button "Open setup and settings" [ref=e44] [cursor=pointer]:
+            - img [ref=e45]
+            - generic [ref=e48]: Setup
+        - generic [ref=e49]: One-time setup needed
+        - generic [ref=e50]: Local accelerator ready.
+    - generic [ref=e51]:
+      - main [ref=e52]:
+        - generic [ref=e142]:
+          - generic [ref=e143]:
+            - generic [ref=e144]:
+              - textbox "Session title" [ref=e145]: March 3 Meeting
+              - generic [ref=e146]:
+                - generic [ref=e147]: Apr 23, 2026, 5:13 PM
+                - generic [ref=e148]: ·
+                - generic [ref=e149]: 1:55:38
+                - generic [ref=e150]: ·
+                - generic [ref=e151]: March 3 Meeting.mp4
+                - generic [ref=e152]: ·
+                - generic [ref=e153]: Local accelerator
+            - button "Show details" [ref=e155] [cursor=pointer]:
+              - img [ref=e156]
+          - generic [ref=e158]:
+            - img [ref=e159]
+            - generic [ref=e162]: One-time setup. Download the local tools once, then Transcribble stays on this device.
+            - button "Get ready" [ref=e163] [cursor=pointer]
+          - generic [ref=e164]:
+            - img [ref=e165]
+            - generic [ref=e167]:
+              - generic [ref=e168]: Local accelerator in progress.
+              - generic [ref=e169]: This recording was routed to the local accelerator because the browser path was not reliable enough for a full pass.
+          - generic [ref=e170]:
+            - slider "Scrub recording" [ref=e173] [cursor=pointer]
+            - generic [ref=e174]:
+              - generic [ref=e175]:
+                - generic [ref=e176]: 0:00
+                - generic [ref=e177]: /
+                - generic [ref=e178]: 1:55:38
+              - generic [ref=e179]:
+                - button "Previous segment" [ref=e180] [cursor=pointer]:
+                  - img [ref=e181]
+                - button "Back 5 seconds" [ref=e183] [cursor=pointer]:
+                  - img [ref=e184]
+                - button "Play" [ref=e187] [cursor=pointer]:
+                  - img [ref=e188]
+                - button "Forward 5 seconds" [ref=e190] [cursor=pointer]:
+                  - img [ref=e191]
+                - button "Next segment" [ref=e194] [cursor=pointer]:
+                  - img [ref=e195]
+              - generic [ref=e197]:
+                - button "Toggle bookmark" [ref=e198] [cursor=pointer]:
+                  - img [ref=e199]
+                - generic [ref=e201]:
+                  - combobox "Playback speed" [ref=e202] [cursor=pointer]:
+                    - option "0.75×"
+                    - option "1×" [selected]
+                    - option "1.25×"
+                    - option "1.5×"
+                    - option "2×"
+                  - generic: ▾
+          - generic "Transcript" [ref=e205]:
+            - generic [ref=e207]:
+              - img [ref=e209]
+              - generic [ref=e211]: Getting the local model ready
+              - generic [ref=e212]: Downloading the fast local model on this machine. 0 B cached locally so far.
+        - button "Open setup and settings" [ref=e96] [cursor=pointer]:
+          - img [ref=e97]
+      - status [ref=e215]:
+        - generic [ref=e217]: Started the local accelerator for March 3 Meeting.mp4.
+        - button "Dismiss notification" [ref=e218] [cursor=pointer]:
+          - img [ref=e219]
+  - button "Open Next.js Dev Tools" [ref=e112] [cursor=pointer]:
+    - img [ref=e113]
+  - alert [ref=e100]

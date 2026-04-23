@@ -1,56 +1,69 @@
-import { spawnSync } from "node:child_process";
-
-const host = process.env.TRANSCRIBBLE_HELPER_HOST ?? "127.0.0.1";
-const port = process.env.TRANSCRIBBLE_HELPER_PORT ?? "7771";
-const baseUrl = `http://${host}:${port}`;
-
-function hasBinary(command) {
-  const result = spawnSync(command, ["-version"], { stdio: "ignore" });
-  return result.status === 0;
-}
+import {
+  collectBlockingIssues,
+  collectPreflight,
+  fetchRunningHelper,
+  ffmpegInstallHint,
+  formatBackendLabel,
+  helperBaseUrl,
+  printPreflightSummary,
+} from "./helper-support.mjs";
 
 function fail(message) {
   console.error(message);
   process.exit(1);
 }
 
-console.log(`[helper-check] ffmpeg: ${hasBinary("ffmpeg") ? "found" : "missing"}`);
-console.log(`[helper-check] ffprobe: ${hasBinary("ffprobe") ? "found" : "missing"}`);
+const prefix = "[helper-check]";
+const preflight = collectPreflight();
+printPreflightSummary(prefix, preflight);
 
-let health;
-try {
-  const response = await fetch(`${baseUrl}/health`, {
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    fail(`[helper-check] Health request failed with ${response.status}.`);
+const runningHelper = await fetchRunningHelper();
+if (!runningHelper.reachable) {
+  const blockingIssues = collectBlockingIssues(preflight);
+
+  if (blockingIssues.length > 0) {
+    for (const issue of blockingIssues) {
+      console.error(`${prefix} ${issue}`);
+    }
+
+    if (!preflight.ffmpeg.found || !preflight.ffprobe.found) {
+      console.error(`${prefix} macOS fix: ${ffmpegInstallHint()}`);
+    }
+
+    if (!preflight.venv.present || !preflight.venv.preferredBackend) {
+      console.error(`${prefix} install fix: npm run helper:install`);
+    }
+
+    process.exit(1);
   }
-  health = await response.json();
-} catch {
+
   fail(
-    `[helper-check] Helper not reachable at ${baseUrl}. Run npm run helper:start after npm run helper:install.`,
+    `${prefix} Helper is installed but not reachable at ${helperBaseUrl}. Run npm run helper:start.`,
   );
 }
 
-const capabilitiesResponse = await fetch(`${baseUrl}/capabilities`, {
-  cache: "no-store",
-});
-if (!capabilitiesResponse.ok) {
-  fail(`[helper-check] Capabilities request failed with ${capabilitiesResponse.status}.`);
-}
-
-const capabilities = await capabilitiesResponse.json();
+const { health, capabilities } = runningHelper;
 
 console.log(
-  `[helper-check] helper: version=${health.version ?? "unknown"} protocol=${health.protocolVersion ?? "unknown"} backend=${capabilities.backendLabel ?? capabilities.backend ?? "none"}`,
+  `${prefix} helper: version=${health.version ?? "unknown"} protocol=${health.protocolVersion ?? "unknown"} endpoint=${helperBaseUrl} backend=${capabilities.backendLabel ?? formatBackendLabel(capabilities.backend)}`,
 );
 
 if (!capabilities.available) {
   fail(
-    `[helper-check] Helper responded but is not ready. ${capabilities.reason ?? "Check local dependencies and reinstall the helper."}`,
+    `${prefix} Helper responded but is not ready. ${capabilities.reason ?? "Check local dependencies and reinstall the helper."}`,
   );
 }
 
 console.log(
-  `[helper-check] ready: ffmpeg=${capabilities.ffmpegReady ? "yes" : "no"} ffprobe=${capabilities.ffprobeReady ? "yes" : "no"} models=${(capabilities.models ?? []).length}`,
+  `${prefix} ready: ffmpeg=${capabilities.ffmpegReady ? "yes" : "no"} ffprobe=${capabilities.ffprobeReady ? "yes" : "no"} models=${(capabilities.models ?? []).length}`,
 );
+
+for (const model of capabilities.models ?? []) {
+  const diskLabel =
+    typeof model.diskUsageBytes === "number" && model.diskUsageBytes > 0
+      ? `${(model.diskUsageBytes / (1024 * 1024 * 1024)).toFixed(1)} GB cached`
+      : "not cached yet";
+  console.log(
+    `${prefix} model ${model.profile}: ${model.modelName} - ${model.downloaded ? diskLabel : "downloads on first use"}`,
+  );
+}

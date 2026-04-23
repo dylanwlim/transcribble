@@ -23,11 +23,13 @@ Do not assume:
 - The default architecture is zero-dollar and local-first. Do not reintroduce any default dependency on OpenAI, Vercel Blob, Vercel Workflows, or another usage-billed backend.
 - The helper may not be installed or running on a given machine. If a job needs it, keep the file local and say that the local accelerator is required.
 - Helper lifecycle commands are `npm run helper:install`, `npm run helper:start`, and `npm run helper:check`.
+- `npm run helper:check` is the diagnostic entrypoint. It should report whether `ffmpeg`, `ffprobe`, the helper venv/backend, or the running localhost service is missing.
 - Import validation is quota-aware. Do not reintroduce a fixed file-size cap or “upload” language for local recording imports.
 - Speaker turns are currently pause-derived. `speakerLabel`, `manual`, and `diarized` are future seams, not a finished speaker workflow.
 - Export is transcript-focused (`txt`, `md`, `srt`, `vtt`). Whole-workspace backup/import is still missing.
 - `lib/transcribble/enrichment.ts` is optional and feature-flagged. Core flows should not depend on hosted enrichments.
 - Verify Vercel before touching public URLs. Keep `README.md` and `app/layout.tsx` aligned with the live public alias, not stale defaults.
+- Helper model downloads are one-time local cache events under `~/.transcribble-helper`; UI/docs should describe them honestly and avoid claiming the model is already cached before the weight files are actually present.
 
 Validation:
 - Docs/instruction-only edits: verify referenced files and commands exist; do not run `npm run validate` by default.

@@ -1,0 +1,86 @@
+[    3173ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ webpack-internal:///(app-pages-browser)/./node_modules/next/dist/compiled/react-dom/cjs/react-dom-client.development.js:25630
+[    3374ms] [LOG] [Fast Refresh] rebuilding @ webpack-internal:///(app-pages-browser)/./node_modules/next/dist/client/dev/hot-reloader/app/hot-reloader-app.js:196
+[    3478ms] [LOG] [Fast Refresh] done in 105ms @ webpack-internal:///(app-pages-browser)/./node_modules/next/dist/client/dev/report-hmr-latency.js:13
+[    3492ms] [LOG] [Fast Refresh] rebuilding @ webpack-internal:///(app-pages-browser)/./node_modules/next/dist/client/dev/hot-reloader/app/hot-reloader-app.js:196
+[    3955ms] [LOG] [Fast Refresh] done in 464ms @ webpack-internal:///(app-pages-browser)/./node_modules/next/dist/client/dev/report-hmr-latency.js:13
+[    3995ms] [LOG] [Fast Refresh] rebuilding @ webpack-internal:///(app-pages-browser)/./node_modules/next/dist/client/dev/hot-reloader/app/hot-reloader-app.js:196
+[    4060ms] [LOG] [Fast Refresh] done in 65ms @ webpack-internal:///(app-pages-browser)/./node_modules/next/dist/client/dev/report-hmr-latency.js:13
+[  166097ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ webpack-internal:///(app-pages-browser)/./node_modules/next/dist/compiled/react-dom/cjs/react-dom-client.development.js:25630
+[  187369ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:7771/jobs/951b116d-b37d-464e-825d-a70db70b0d3a:0
+[  420765ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:7771/jobs/951b116d-b37d-464e-825d-a70db70b0d3a:0
+[  442348ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:7771/jobs/951b116d-b37d-464e-825d-a70db70b0d3a:0
+[  493906ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:7771/jobs/951b116d-b37d-464e-825d-a70db70b0d3a:0
+[  831390ms] [LOG] [Fast Refresh] rebuilding @ webpack-internal:///(app-pages-browser)/./node_modules/next/dist/client/dev/hot-reloader/app/hot-reloader-app.js:196
+[  832350ms] [LOG] [Fast Refresh] done in 961ms @ webpack-internal:///(app-pages-browser)/./node_modules/next/dist/client/dev/report-hmr-latency.js:13
+[ 1021258ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3000/_next/static/css/app/layout.css?v=1776979797282:0
+[ 1021272ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3000/_next/static/chunks/webpack.js?v=1776979797282:0
+[ 1021273ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3000/_next/static/chunks/main-app.js?v=1776979797282:0
+[ 1146443ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3000/_next/static/css/app/layout.css?v=1776979922649:0
+[ 1146451ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3000/_next/static/chunks/main-app.js?v=1776979922649:0
+[ 1164042ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3000/_next/static/css/app/layout.css?v=1776979940376:0
+[ 1164045ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3000/_next/static/chunks/main-app.js?v=1776979940376:0
+[ 1185765ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:3000/:0
+[ 1185969ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ webpack-internal:///(pages-dir-browser)/./node_modules/react-dom/cjs/react-dom-client.development.js:28004
+[ 1186025ms] Error: Cannot find module './vendor-chunks/lucide-react.js'
+Require stack:
+- /Users/dylan/Projects/Dev/transcribble/.next/server/webpack-runtime.js
+- /Users/dylan/Projects/Dev/transcribble/.next/server/pages/_document.js
+- /Users/dylan/Projects/Dev/transcribble/node_modules/next/dist/server/require.js
+- /Users/dylan/Projects/Dev/transcribble/node_modules/next/dist/server/next-server.js
+- /Users/dylan/Projects/Dev/transcribble/node_modules/next/dist/server/next.js
+- /Users/dylan/Projects/Dev/transcribble/node_modules/next/dist/server/lib/start-server.js
+- /Users/dylan/Projects/Dev/transcribble/node_modules/next/dist/cli/next-start.js
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1475:15)
+    at <unknown> (file:///Users/dylan/Projects/Dev/transcribble/node_modules/next/dist/server/require-hook.js:57:36)
+    at wrapResolveFilename (node:internal/modules/cjs/loader:1048:27)
+    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1072:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1093:12)
+    at Module._load (node:internal/modules/cjs/loader:1261:25)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.require (node:internal/modules/cjs/loader:1575:12)
+    at mod.require (file:///Users/dylan/Projects/Dev/transcribble/node_modules/next/dist/server/require-hook.js:68:28)
+    at require (node:internal/modules/helpers:191:16)
+[ 1186026ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3000/_next/static/development/_devMiddlewareManifest.json:0
+[ 1186026ms] [LOG] Failed to fetch _devMiddlewareManifest SyntaxError: Unexpected token 'N', "Not Found" is not valid JSON @ webpack-internal:///(pages-dir-browser)/./node_modules/next/dist/client/page-loader.js:58
+[ 1186105ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3000/favicon.ico:0
+[ 1186117ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3000/__nextjs_original-stack-frames:0
+[ 1258300ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1258301ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1268301ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1268304ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1278300ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1278302ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1288301ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1288303ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1298300ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1298302ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1308299ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1308301ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1318299ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1318300ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1328297ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1328299ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1338304ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1338306ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1348319ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1348321ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1358327ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1358328ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1368328ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1368331ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1378331ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1378334ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1388332ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1388333ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1398333ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1398335ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1408333ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1408334ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1418333ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1418334ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1428333ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1428335ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1438333ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1438334ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0
+[ 1448332ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7771/health:0
+[ 1448334ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7771/health:0

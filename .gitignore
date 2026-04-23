@@ -30,3 +30,4 @@ playwright-report
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+.playwright-cli/proof/March 3 Meeting.mp4

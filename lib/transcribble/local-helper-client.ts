@@ -1,8 +1,11 @@
 "use client";
 
 import {
+  LOCAL_ACCELERATOR_CHECK_COMMAND,
   LOCAL_ACCELERATOR_ENDPOINT,
   LOCAL_ACCELERATOR_FALLBACK_ENDPOINT,
+  LOCAL_ACCELERATOR_INSTALL_COMMAND,
+  LOCAL_ACCELERATOR_START_COMMAND,
 } from "@/lib/transcribble/constants";
 import type {
   HelperModelProfile,
@@ -13,6 +16,7 @@ import type {
 
 const DEFAULT_TIMEOUT_MS = 1_500;
 const HELPER_ENDPOINTS = [LOCAL_ACCELERATOR_ENDPOINT, LOCAL_ACCELERATOR_FALLBACK_ENDPOINT];
+const JOB_READ_RETRY_DELAYS_MS = [250, 750];
 
 export interface CreateLocalHelperJobRequest {
   jobId: string;
@@ -54,8 +58,14 @@ function getUnavailableCapabilities(reason: string): LocalHelperCapabilities {
     url: LOCAL_ACCELERATOR_ENDPOINT,
     models: [],
     reason,
-    nextAction: "Install ffmpeg and ffprobe, then run npm run helper:install, npm run helper:start, and npm run helper:check.",
+    nextAction:
+      `Run ${LOCAL_ACCELERATOR_CHECK_COMMAND} in this repo to diagnose whether ffmpeg, ffprobe, the helper virtualenv, or the localhost service is missing. ` +
+      `If the helper is not installed yet, run ${LOCAL_ACCELERATOR_INSTALL_COMMAND}, then ${LOCAL_ACCELERATOR_START_COMMAND}, then ${LOCAL_ACCELERATOR_CHECK_COMMAND} again.`,
   };
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
 }
 
 export async function connectToLocalHelper(timeoutMs = DEFAULT_TIMEOUT_MS): Promise<LocalHelperConnection> {
@@ -199,16 +209,39 @@ export async function uploadLocalHelperSourceFile(
 }
 
 export async function readLocalHelperJob(helperUrl: string, jobId: string) {
-  const response = await fetch(`${helperUrl}/jobs/${jobId}`, {
-    cache: "no-store",
-  });
+  let lastError: Error | null = null;
 
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? "Could not load local helper progress.");
+  for (let attempt = 0; attempt <= JOB_READ_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const response = await fetch(`${helperUrl}/jobs/${jobId}`, {
+        cache: "no-store",
+      });
+
+      if (response.ok) {
+        return (await response.json()) as { job: LocalHelperJob };
+      }
+
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      const message = body?.error ?? "Could not load local helper progress.";
+
+      if (response.status < 500 || attempt === JOB_READ_RETRY_DELAYS_MS.length) {
+        throw new Error(message);
+      }
+
+      lastError = new Error(message);
+    } catch (error) {
+      lastError =
+        error instanceof Error ? error : new Error("Could not load local helper progress.");
+
+      if (attempt === JOB_READ_RETRY_DELAYS_MS.length) {
+        throw lastError;
+      }
+    }
+
+    await sleep(JOB_READ_RETRY_DELAYS_MS[attempt] ?? 0);
   }
 
-  return (await response.json()) as { job: LocalHelperJob };
+  throw lastError ?? new Error("Could not load local helper progress.");
 }
 
 export async function retryLocalHelperJob(helperUrl: string, jobId: string) {

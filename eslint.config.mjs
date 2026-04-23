@@ -15,7 +15,7 @@ const config = [
     extends: ["next/core-web-vitals", "next/typescript"],
   }),
   {
-    ignores: [".next/**", "out/**", "build/**", "next-env.d.ts", "app/.well-known/**"],
+    ignores: [".next/**", "out/**", "build/**", "next-env.d.ts", "app/.well-known/**", "helper/.venv/**"],
   },
 ];
 

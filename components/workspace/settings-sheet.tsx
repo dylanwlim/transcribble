@@ -342,9 +342,13 @@ export function SettingsSheet({
                 <div className="text-[13px] font-medium text-foreground">Install, start, and check</div>
                 <div className="mt-0.5 text-[11px] leading-5 text-muted-foreground">
                   {helperNextAction ??
-                    "Install ffmpeg and ffprobe first, then install and start the local helper in this repo."}
+                    "Run the helper check command first so it can tell you exactly whether ffmpeg, ffprobe, the helper virtualenv, or the localhost service is missing."}
                 </div>
                 <div className="mt-3 space-y-2 text-[11px] leading-5 text-muted-foreground">
+                  <CommandStep
+                    label="Diagnose this machine first"
+                    command={LOCAL_ACCELERATOR_CHECK_COMMAND}
+                  />
                   <CommandStep
                     label="Install Python dependencies"
                     command={LOCAL_ACCELERATOR_INSTALL_COMMAND}
@@ -354,7 +358,7 @@ export function SettingsSheet({
                     command={LOCAL_ACCELERATOR_START_COMMAND}
                   />
                   <CommandStep
-                    label="Check localhost health and capabilities"
+                    label="Re-check localhost health and capabilities"
                     command={LOCAL_ACCELERATOR_CHECK_COMMAND}
                   />
                 </div>

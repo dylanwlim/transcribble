@@ -375,6 +375,69 @@ test("fetchLocalHelperCapabilities detects a reachable helper and helper job syn
   assert.equal(synced.resumeState?.completedChunks, 2);
 });
 
+test("readLocalHelperJob retries a transient helper 500 before failing", async (t) => {
+  let attempts = 0;
+  const server = http.createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.setHeader("access-control-allow-origin", "*");
+
+    if (request.method === "GET" && request.url === "/jobs/job-retry") {
+      attempts += 1;
+
+      if (attempts === 1) {
+        response.statusCode = 500;
+        response.end(JSON.stringify({ error: "helper write in progress" }));
+        return;
+      }
+
+      response.end(
+        JSON.stringify({
+          job: {
+            id: "job-retry",
+            projectId: "project-retry",
+            sourceName: "meeting.mp4",
+            sourceType: "video/mp4",
+            sourceSize: 1.1 * 1024 * 1024 * 1024,
+            mediaKind: "video",
+            status: "transcribing",
+            progress: 62,
+            detail: "Transcribing chunk 3 of 15 locally.",
+            createdAt: "2026-04-23T12:00:00Z",
+            updatedAt: "2026-04-23T12:00:05Z",
+            modelProfile: "fast",
+            totalChunks: 15,
+            completedChunks: 2,
+            sourceUploaded: true,
+            resume: {
+              totalChunks: 15,
+              completedChunks: 2,
+              completedChunkIndexes: [0, 1],
+              nextChunkIndex: 2,
+            },
+          },
+        }),
+      );
+      return;
+    }
+
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  t.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const helperBaseUrl = `http://127.0.0.1:${address.port}`;
+
+  const job = await readLocalHelperJob(helperBaseUrl, "job-retry");
+  assert.equal(job.job.status, "transcribing");
+  assert.equal(attempts, 2);
+});
+
 function makeSizedFile(name: string, type: string, size: number) {
   const file = new File(["x"], name, { type });
   Object.defineProperty(file, "size", {

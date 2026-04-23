@@ -62,6 +62,9 @@ It:
 4. Run `npm run helper:check`.
 
 Helper state is stored under `~/.transcribble-helper` by default.
+If the helper is unavailable, run `npm run helper:check` first. It now tells you explicitly whether `ffmpeg`, `ffprobe`, the helper Python env/backend, or the localhost service is missing.
+On Apple Silicon, the helper prefers MLX Whisper when it is installed and falls back to `faster-whisper` otherwise.
+The first helper-backed job downloads the selected local model once, caches it under `~/.transcribble-helper`, and reuses it on later runs.
 
 ## First-Time Browser Setup
 

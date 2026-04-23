@@ -65,6 +65,31 @@ def file_size(path: Path) -> int:
     return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
 
 
+def unique_file_sizes(paths: list[Path]) -> tuple[int, list[Path]]:
+    total = 0
+    files: dict[tuple[int, int], Path] = {}
+
+    for root in paths:
+        if not root.exists():
+            continue
+
+        candidates = [root] if root.is_file() else [item for item in root.rglob("*") if item.is_file()]
+        for path in candidates:
+            try:
+                stats = path.stat()
+            except OSError:
+                continue
+
+            key = (stats.st_dev, stats.st_ino)
+            if key in files:
+                continue
+
+            files[key] = path
+            total += stats.st_size
+
+    return total, list(files.values())
+
+
 def normalize_spacing(text: str) -> str:
     return " ".join((text or "").split())
 
@@ -157,13 +182,14 @@ def model_cache_paths(profile: str, backend: str | None) -> list[Path]:
         return []
 
     matches: dict[str, Path] = {}
+    markers = set(model_cache_markers(profile, backend))
     for root in [MODELS_DIR, HF_CACHE_DIR]:
         if not root.exists():
             continue
         for path in root.rglob("*"):
             if not path.is_dir():
                 continue
-            if any(marker in path.name for marker in model_cache_markers(profile, backend)):
+            if path.name in markers:
                 matches[str(path.resolve())] = path
 
     if backend == "faster-whisper":
@@ -172,6 +198,31 @@ def model_cache_paths(profile: str, backend: str | None) -> list[Path]:
             matches[str(direct_root.resolve())] = direct_root
 
     return list(matches.values())
+
+
+def helper_cache_usage() -> int:
+    total, _ = unique_file_sizes([MODELS_DIR, HF_CACHE_DIR])
+    return total
+
+
+def model_ready_files(backend: str | None) -> set[str]:
+    if backend == "mlx-whisper":
+        return {"weights.safetensors"}
+    if backend == "faster-whisper":
+        return {"model.bin", "model.safetensors"}
+    return set()
+
+
+def model_has_incomplete_artifacts(paths: list[Path]) -> bool:
+    for root in paths:
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.name.endswith(".incomplete") or path.name.endswith(".lock"):
+                return True
+    return False
 
 
 def capabilities_payload() -> dict[str, Any]:
@@ -215,7 +266,7 @@ def capabilities_payload() -> dict[str, Any]:
         "supportsWordTimestamps": backend in {"mlx-whisper", "faster-whisper", "stub"},
         "supportsAlignment": False,
         "supportsDiarization": False,
-        "cacheBytes": file_size(MODELS_DIR) + file_size(HF_CACHE_DIR),
+        "cacheBytes": helper_cache_usage(),
         "models": models,
         "reason": reason,
         "nextAction": helper_next_action(backend),
@@ -249,7 +300,20 @@ def model_root(profile: str, backend: str | None) -> Path:
 def model_downloaded(profile: str, backend: str | None) -> bool:
     if backend == "stub":
         return True
-    return any(file_size(path) > 0 for path in model_cache_paths(profile, backend))
+    paths = model_cache_paths(profile, backend)
+    if not paths or model_has_incomplete_artifacts(paths):
+        return False
+
+    ready_files = model_ready_files(backend)
+    if ready_files:
+        for root in paths:
+            for path in root.rglob("*"):
+                if path.is_file() and path.name in ready_files and path.stat().st_size > 0:
+                    return True
+        return False
+
+    _, files = unique_file_sizes(paths)
+    return any(path.stat().st_size > 0 for path in files)
 
 
 def model_disk_usage(profile: str, backend: str | None) -> int | None:
@@ -258,7 +322,8 @@ def model_disk_usage(profile: str, backend: str | None) -> int | None:
     paths = model_cache_paths(profile, backend)
     if not paths:
         return 0
-    return sum(file_size(path) for path in paths)
+    total, _ = unique_file_sizes(paths)
+    return total
 
 
 def compute_device() -> tuple[str, str]:
@@ -408,7 +473,10 @@ class JobStore:
 
     def save(self, job: dict[str, Any]) -> dict[str, Any]:
         job["updatedAt"] = utc_now()
-        self.job_path(job["id"]).write_text(json.dumps(job, ensure_ascii=True, indent=2), encoding="utf-8")
+        job_path = self.job_path(job["id"])
+        tmp_path = job_path.with_name(f"{job_path.name}.tmp")
+        tmp_path.write_text(json.dumps(job, ensure_ascii=True, indent=2), encoding="utf-8")
+        os.replace(tmp_path, job_path)
         return job
 
     def update(self, job_id: str, updater) -> dict[str, Any]:
@@ -752,6 +820,24 @@ def track_model_download(
         last_bytes = -1
         while not stop_event.wait(MODEL_DOWNLOAD_POLL_INTERVAL_SEC):
             downloaded_bytes = model_disk_usage(profile, backend) or 0
+            if model_downloaded(profile, backend):
+                try:
+                    STORE.update(
+                        job_id,
+                        lambda job: {
+                            **job,
+                            "status": "transcribing",
+                            "progress": max(28, int(job.get("progress") or 0)),
+                            "detail": (
+                                f"The {model_label} local model is cached on this machine. "
+                                "Starting local transcription."
+                            ),
+                            "modelDownloadBytes": downloaded_bytes,
+                        },
+                    )
+                except FileNotFoundError:
+                    return
+                return
             if downloaded_bytes == last_bytes:
                 continue
             last_bytes = downloaded_bytes

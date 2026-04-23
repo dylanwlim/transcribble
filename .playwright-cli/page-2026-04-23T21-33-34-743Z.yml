@@ -1,0 +1,74 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e4]:
+      - generic [ref=e6]:
+        - img [ref=e8]
+        - generic [ref=e13]: Transcribble
+      - generic [ref=e15]:
+        - img
+        - searchbox "Search library" [ref=e16]
+        - generic:
+          - generic: ⌘
+          - generic: K
+      - generic [ref=e17]:
+        - button "Add recording" [ref=e18] [cursor=pointer]:
+          - img [ref=e19]
+          - generic [ref=e22]: Add recording
+          - generic [ref=e23]:
+            - generic [ref=e24]: ⌘
+            - generic [ref=e25]: O
+        - button "Record from microphone" [ref=e26] [cursor=pointer]:
+          - img [ref=e27]
+      - generic [ref=e33]:
+        - generic [ref=e34]: Library
+        - generic [ref=e35]: Add a recording to begin.
+      - generic [ref=e36]:
+        - generic [ref=e37]:
+          - generic [ref=e39]:
+            - img [ref=e40]
+            - generic [ref=e42]:
+              - generic [ref=e43]: 1.1 GB used
+              - generic [ref=e44]: 2.7 GB available
+              - generic [ref=e45]:
+                - img [ref=e46]
+                - generic [ref=e48]: Browser may clear files if storage gets tight
+          - button "Open setup and settings" [ref=e49] [cursor=pointer]:
+            - img [ref=e50]
+            - generic [ref=e53]: Setup
+        - generic [ref=e54]: One-time setup needed
+        - generic [ref=e55]: Large recordings need the local accelerator running on this machine.
+    - main [ref=e57]:
+      - generic [ref=e59]:
+        - img [ref=e61]
+        - heading "Your local voice workspace" [level=1] [ref=e67]
+        - paragraph [ref=e68]: Bring in audio or other supported FFmpeg-decodable media. Browser mode stays convenient for smaller, safer recordings. The local accelerator is the default path for long or large media and keeps the work on this machine.
+        - generic [ref=e69]:
+          - button "Add recording" [ref=e70] [cursor=pointer]:
+            - img [ref=e71]
+            - text: Add recording
+            - generic [ref=e74]:
+              - generic [ref=e75]: ⌘
+              - generic [ref=e76]: O
+          - button "Get this browser ready" [ref=e77] [cursor=pointer]:
+            - img [ref=e78]
+            - text: Get this browser ready
+          - button "Local accelerator setup" [ref=e81] [cursor=pointer]
+        - generic [ref=e82]:
+          - generic [ref=e83]: Drop files anywhere
+          - 'generic "Supported formats: MP3, MP4, M4A, WAV, MOV, OGG, WEBM, FLAC, AAC" [ref=e85]':
+            - generic [ref=e86]: MP3
+            - generic [ref=e87]: MP4
+            - generic [ref=e88]: M4A
+            - generic [ref=e89]: WAV
+            - generic [ref=e90]: MOV
+            - generic [ref=e91]: OGG
+            - generic [ref=e92]: WEBM
+            - generic [ref=e93]: FLAC
+            - generic [ref=e94]: AAC
+          - generic [ref=e95]:
+            - img [ref=e96]
+            - generic [ref=e99]: Stays on this device
+          - generic [ref=e100]: Long recordings need the local accelerator
+      - button "Open setup and settings" [ref=e101] [cursor=pointer]:
+        - img [ref=e102]
+  - alert [ref=e105]

@@ -1,37 +1,69 @@
-import { existsSync } from "node:fs";
-import path from "node:path";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import {
+  collectBlockingIssues,
+  collectPreflight,
+  fetchRunningHelper,
+  ffmpegInstallHint,
+  formatBackendLabel,
+  helperBaseUrl,
+  helperScriptPath,
+  printPreflightSummary,
+  repoRoot,
+  venvPythonPath,
+} from "./helper-support.mjs";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const helperDir = path.join(repoRoot, "helper");
-const venvDir = path.join(helperDir, ".venv");
+const prefix = "[helper-start]";
+const preflight = collectPreflight();
+printPreflightSummary(prefix, preflight);
 
-function venvPython() {
-  if (process.platform === "win32") {
-    return path.join(venvDir, "Scripts", "python.exe");
+const runningHelper = await fetchRunningHelper();
+if (runningHelper.reachable) {
+  const backendLabel = formatBackendLabel(
+    runningHelper.capabilities?.backend ?? runningHelper.health?.backend,
+  );
+
+  if (!runningHelper.capabilities?.available) {
+    console.error(
+      `${prefix} A helper is already responding at ${helperBaseUrl}, but it is not ready. ${
+        runningHelper.capabilities?.reason ?? "Fix the local dependencies and restart it."
+      }`,
+    );
+    process.exit(1);
   }
 
-  return path.join(venvDir, "bin", "python");
+  console.log(
+    `${prefix} helper already running at ${helperBaseUrl} with backend ${backendLabel}.`,
+  );
+  process.exit(0);
 }
 
-function findPython() {
-  const candidate = venvPython();
-  if (existsSync(candidate)) {
-    return candidate;
+const blockingIssues = collectBlockingIssues(preflight);
+if (blockingIssues.length > 0) {
+  for (const issue of blockingIssues) {
+    console.error(`${prefix} ${issue}`);
   }
 
-  console.error("Transcribble Helper is not installed yet. Run `npm run helper:install` first.");
+  if (!preflight.ffmpeg.found || !preflight.ffprobe.found) {
+    console.error(`${prefix} macOS fix: ${ffmpegInstallHint()}`);
+  }
+
+  if (!preflight.venv.present || !preflight.venv.preferredBackend) {
+    console.error(`${prefix} install fix: npm run helper:install`);
+  }
+
   process.exit(1);
 }
 
 const child = spawn(
-  findPython(),
-  [path.join(helperDir, "transcribble_helper.py")],
+  venvPythonPath(),
+  [helperScriptPath],
   {
     cwd: repoRoot,
     stdio: "inherit",
-    env: process.env,
+    env: {
+      ...process.env,
+      PYTHONUNBUFFERED: "1",
+    },
   },
 );
 
