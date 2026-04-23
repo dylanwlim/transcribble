@@ -37,6 +37,7 @@ import {
   warmMediaRuntime,
 } from "@/lib/transcribble/media";
 import {
+  applyDiscoveredProjectDuration,
   createProjectFromImportedFile,
   recoverPersistedProjects,
   updateProjectTimestamp,
@@ -476,6 +477,30 @@ export function useTranscribble() {
     [selectedProject],
   );
   const selectedFileStoreKey = selectedProject?.fileStoreKey ?? null;
+
+  const persistProjectDuration = useCallback(
+    (projectId: string, duration: number) => {
+      if (!Number.isFinite(duration) || duration <= 0) {
+        return;
+      }
+
+      const currentProject = projectsRef.current.find((project) => project.id === projectId);
+      if (
+        !currentProject ||
+        (typeof currentProject.duration === "number" &&
+          Math.abs(currentProject.duration - duration) < 0.25)
+      ) {
+        return;
+      }
+
+      applyProjectUpdate(
+        projectId,
+        (project) => applyDiscoveredProjectDuration(project, duration),
+        { persist: true },
+      );
+    },
+    [applyProjectUpdate],
+  );
 
   const isBusy =
     selectedProject?.status === "pending-upload" ||
@@ -1343,7 +1368,26 @@ export function useTranscribble() {
     writeStoredJson(HELPER_PREFERENCES_KEY, helperPreferences);
   }, [helperPreferences]);
 
+  const activeHelperProjects = useMemo(
+    () => projects.filter((project) => projectNeedsHelperReconnect(project)),
+    [projects],
+  );
+
+  const shouldPollHelperCapabilities = useMemo(
+    () =>
+      (helperCapabilities?.available ?? false) ||
+      projects.some(
+        (project) =>
+          project.backend === "local-helper" || project.step === "needs-local-helper",
+      ),
+    [helperCapabilities?.available, projects],
+  );
+
   useEffect(() => {
+    if (!workspaceReady || !shouldPollHelperCapabilities) {
+      return;
+    }
+
     const intervalId = window.setInterval(() => {
       void refreshHelperCapabilities();
     }, 10_000);
@@ -1351,7 +1395,7 @@ export function useTranscribble() {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [refreshHelperCapabilities]);
+  }, [refreshHelperCapabilities, shouldPollHelperCapabilities, workspaceReady]);
 
   useEffect(() => {
     if (!workspaceReady || activeJobRef.current || queuedProjects.length === 0) {
@@ -1365,11 +1409,6 @@ export function useTranscribble() {
 
     void processProject(nextProject);
   }, [processProject, queuedProjects, workspaceReady]);
-
-  const activeHelperProjects = useMemo(
-    () => projects.filter((project) => projectNeedsHelperReconnect(project)),
-    [projects],
-  );
 
   useEffect(() => {
     if (
@@ -1466,6 +1505,8 @@ export function useTranscribble() {
       if (!file) {
         mediaUrlRef.current = null;
         setMediaUrl(null);
+        setCurrentTime(0);
+        setIsPlaying(false);
         return;
       }
 
@@ -1491,6 +1532,10 @@ export function useTranscribble() {
       const nextHelperStarts: Array<{ project: TranscriptProject; file: File; detail: string }> = [];
       const errors: string[] = [];
       let workingStorageState = storageState;
+      const latestHelperCapabilities =
+        helperCapabilities?.available
+          ? helperCapabilities
+          : await refreshHelperCapabilities().catch(() => helperCapabilities);
 
       for (const file of files) {
         const validation = await validateMediaImport(file, workingStorageState);
@@ -1502,7 +1547,7 @@ export function useTranscribble() {
 
         const backendDecision = chooseTranscriptionBackend(file, {
           browserLocalAvailable: capabilityIssue === null,
-          helperAvailable: Boolean(helperCapabilities?.available),
+          helperAvailable: Boolean(latestHelperCapabilities?.available),
           deviceMemoryGb:
             typeof navigator === "undefined"
               ? null
@@ -1633,8 +1678,9 @@ export function useTranscribble() {
     },
     [
       capabilityIssue,
-      helperCapabilities?.available,
+      helperCapabilities,
       persistProjectSelection,
+      refreshHelperCapabilities,
       refreshStorageState,
       runtime,
       selectedProjectId,
@@ -2277,6 +2323,7 @@ export function useTranscribble() {
       }
 
       if (project.backend === "local-helper" || project.step === "needs-local-helper") {
+        await refreshHelperCapabilities().catch(() => helperCapabilities);
         await startHelperTranscriptionForProject(
           projectId,
           undefined,
@@ -2302,6 +2349,8 @@ export function useTranscribble() {
     },
     [
       applyProjectUpdate,
+      helperCapabilities,
+      refreshHelperCapabilities,
       startHelperTranscriptionForProject,
       syncHelperJobIntoProject,
     ],
@@ -2585,10 +2634,19 @@ export function useTranscribble() {
 
   const mediaHandlers = {
     onLoadedMetadata: () => {
+      const media = mediaRef.current;
+      const projectId = selectedProjectIdRef.current;
+
+      if (media && projectId) {
+        persistProjectDuration(projectId, media.duration);
+      }
+
       if (pendingSeekRef.current !== null && mediaRef.current) {
         mediaRef.current.currentTime = pendingSeekRef.current;
         setCurrentTime(pendingSeekRef.current);
         pendingSeekRef.current = null;
+      } else if (media) {
+        setCurrentTime(media.currentTime ?? 0);
       }
     },
     onTimeUpdate: () => {

@@ -152,6 +152,24 @@ export function updateProjectTimestamp<T extends TranscriptProject>(project: T):
   };
 }
 
+export function applyDiscoveredProjectDuration<T extends TranscriptProject>(
+  project: T,
+  duration: number,
+): T {
+  if (!Number.isFinite(duration) || duration <= 0) {
+    return project;
+  }
+
+  if (typeof project.duration === "number" && Math.abs(project.duration - duration) < 0.25) {
+    return project;
+  }
+
+  return {
+    ...project,
+    duration,
+  };
+}
+
 function normalizeLegacyRoute(route?: TranscriptionRoute | "external"): TranscriptionBackend | undefined {
   if (route === "local") {
     return "browser";

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyDiscoveredProjectDuration,
   createProjectFromFile,
   recoverPersistedProjects,
   updateProjectTimestamp,
@@ -102,6 +103,26 @@ test("updateProjectTimestamp updates the updatedAt field", () => {
   assert.notEqual(updated.updatedAt, before);
 });
 
+test("applyDiscoveredProjectDuration stores resolved media metadata for helper-routed sessions", () => {
+  const project = makeProject({
+    backend: "local-helper",
+    duration: 0,
+  });
+
+  const updated = applyDiscoveredProjectDuration(project, 3725.42);
+  assert.equal(updated.duration, 3725.42);
+});
+
+test("applyDiscoveredProjectDuration ignores invalid or duplicate metadata durations", () => {
+  const project = makeProject({
+    duration: 120,
+  });
+
+  assert.equal(applyDiscoveredProjectDuration(project, Number.NaN), project);
+  assert.equal(applyDiscoveredProjectDuration(project, 0), project);
+  assert.equal(applyDiscoveredProjectDuration(project, 120.1), project);
+});
+
 function makeProject(overrides: Partial<TranscriptProject>): TranscriptProject {
   return {
     id: overrides.id ?? "1",
@@ -117,6 +138,8 @@ function makeProject(overrides: Partial<TranscriptProject>): TranscriptProject {
     stageLabel: overrides.stageLabel ?? "Queued",
     detail: overrides.detail ?? "",
     runtime: overrides.runtime ?? "wasm",
+    backend: overrides.backend,
+    duration: overrides.duration,
     fileStoreKey: overrides.fileStoreKey ?? overrides.id ?? "1",
     marks: overrides.marks ?? [],
     savedRanges: overrides.savedRanges ?? [],

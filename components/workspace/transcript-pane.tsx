@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -18,8 +19,10 @@ import {
   useRef,
   useState,
 } from "react";
+import React from "react";
 
 import { cn } from "@/lib/utils";
+import { getProjectViewState } from "@/lib/transcribble/status";
 import { formatDuration } from "@/lib/transcribble/transcript";
 import type {
   TranscriptMark,
@@ -73,7 +76,7 @@ function highlightText(text: string, query: string) {
       ),
     );
   } catch {
-    return text;
+    return text as ReactNode;
   }
 }
 
@@ -574,11 +577,19 @@ export function TranscriptPane({
 }
 
 function TranscriptEmptyState({ project }: { project: TranscriptProject }) {
+  const viewState = getProjectViewState(project);
   const isWorking =
-    project.status === "preparing" ||
-    project.status === "loading-model" ||
-    project.status === "transcribing" ||
-    project.status === "queued";
+    viewState.step === "pending-upload" ||
+    viewState.step === "uploading" ||
+    viewState.step === "queued" ||
+    viewState.step === "getting-local-model" ||
+    viewState.step === "getting-browser-ready" ||
+    viewState.step === "getting-recording-ready" ||
+    viewState.step === "probing" ||
+    viewState.step === "extracting-audio" ||
+    viewState.step === "chunking" ||
+    viewState.step === "transcribing" ||
+    viewState.step === "merging";
 
   return (
     <div className="flex h-full items-center justify-center px-6 py-16">
@@ -588,11 +599,9 @@ function TranscriptEmptyState({ project }: { project: TranscriptProject }) {
             <div className="mx-auto mb-4 inline-flex h-10 w-10 items-center justify-center rounded-full bg-muted">
               <Sparkles className="h-4 w-4 text-primary animate-pulse-record" />
             </div>
-            <div className="text-sm font-medium text-foreground">
-              {project.stageLabel}
-            </div>
+            <div className="text-sm font-medium text-foreground">{viewState.transcriptEmptyTitle}</div>
             <div className="mt-1 text-[13px] leading-6 text-muted-foreground">
-              {project.detail}
+              {viewState.transcriptEmptyBody}
             </div>
             {project.progress > 0 ? (
               <div className="mx-auto mt-4 h-1 w-40 overflow-hidden rounded-full bg-border">
@@ -603,19 +612,15 @@ function TranscriptEmptyState({ project }: { project: TranscriptProject }) {
               </div>
             ) : null}
           </>
-        ) : project.status === "error" ? (
+        ) : (
           <>
             <div className="text-sm font-medium text-foreground">
-              Couldn&apos;t finish yet
+              {viewState.transcriptEmptyTitle}
             </div>
             <div className="mt-1 text-[13px] leading-6 text-muted-foreground">
-              {project.detail}
+              {viewState.transcriptEmptyBody}
             </div>
           </>
-        ) : (
-          <div className="text-[13px] text-muted-foreground">
-            No transcript yet.
-          </div>
         )}
       </div>
     </div>

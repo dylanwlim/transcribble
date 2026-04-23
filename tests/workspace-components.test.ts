@@ -14,6 +14,7 @@ import {
 import { EmptyState } from "@/components/workspace/empty-state";
 import { SettingsSheet } from "@/components/workspace/settings-sheet";
 import { Sidebar } from "@/components/workspace/sidebar";
+import { TranscriptPane } from "@/components/workspace/transcript-pane";
 import { shouldRenderTurnHeader } from "@/components/workspace/transcript-pane";
 
 test("sidebar renders setup as a real button with the shared settings label", () => {
@@ -136,4 +137,52 @@ test("turn headers stay hidden until a speaker label exists", () => {
     }),
     true,
   );
+});
+
+test("transcript pane surfaces local-accelerator-required guidance instead of a generic empty state", () => {
+  const html = renderToStaticMarkup(
+    createElement(TranscriptPane, {
+      project: {
+        id: "helper-project",
+        title: "March 3 Meeting",
+        sourceName: "March 3 Meeting.mp4",
+        sourceType: "video/mp4",
+        sourceSize: 1.1 * 1024 * 1024 * 1024,
+        mediaKind: "video",
+        createdAt: new Date("2026-04-23T18:05:00Z").toISOString(),
+        updatedAt: new Date("2026-04-23T18:05:00Z").toISOString(),
+        status: "paused",
+        step: "needs-local-helper",
+        progress: 0,
+        stageLabel: "Local accelerator required",
+        detail:
+          "Large or memory-heavy recordings need the Transcribble Helper running on this machine. Open Settings for the install and start steps, then retry.",
+        runtime: "wasm",
+        backend: "local-helper",
+        fileStoreKey: "helper-project",
+        marks: [],
+        savedRanges: [],
+      },
+      segments: [],
+      turns: [],
+      focusedSegmentId: null,
+      playbackSegmentId: null,
+      marks: [],
+      matchedSegmentIds: new Set<string>(),
+      transcriptQuery: "",
+      onTranscriptQueryChange: () => undefined,
+      onSelectSegment: () => undefined,
+      onUpdateSegmentText: () => undefined,
+      onToggleBookmark: () => undefined,
+      onJumpMatch: () => undefined,
+      transcriptSearchRef: createRef<HTMLInputElement>(),
+      partialTranscript: "",
+      canSearch: false,
+      canEdit: false,
+    }),
+  );
+
+  assert.match(html, /Local accelerator required/);
+  assert.match(html, /Transcribble Helper running on this machine/);
+  assert.doesNotMatch(html, /No transcript yet\./);
 });
