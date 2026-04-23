@@ -4,11 +4,13 @@ import {
   ACCEPT_ATTRIBUTE,
   AUDIO_SAMPLE_RATE,
   FFMPEG_CORE_BASE_URL,
-  MAX_FILE_SIZE_BYTES,
-  MAX_FILE_SIZE_LABEL,
+  SUPPORTED_FORMAT_LABELS,
   SUPPORTED_EXTENSIONS,
+  UNSUPPORTED_FILE_TYPE_MESSAGE,
   VIDEO_EXTENSIONS,
 } from "@/lib/transcribble/constants";
+import type { BrowserStorageState } from "@/lib/transcribble/storage";
+import { validateLocalStorageCapacity } from "@/lib/transcribble/storage";
 import { formatBytes } from "@/lib/transcribble/transcript";
 
 export interface ValidationResult {
@@ -16,6 +18,8 @@ export interface ValidationResult {
   extension?: string;
   mediaKind?: "audio" | "video";
   error?: string;
+  availableStorageBytes?: number | null;
+  requiredStorageBytes?: number | null;
 }
 
 export interface PreparedAudio {
@@ -28,6 +32,13 @@ export interface PreparedAudio {
 export interface PreparationCallbacks {
   onStatus?: (detail: string) => void;
   onProgress?: (progress: number | null) => void;
+}
+
+export class LocalPreparationRiskError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LocalPreparationRiskError";
+  }
 }
 
 export function computeRmsEnvelope(audio: Float32Array, bins = 1024): number[] {
@@ -127,7 +138,7 @@ export function validateMediaFile(file: File | null): ValidationResult {
   if (!SUPPORTED_EXTENSIONS.includes(extension as (typeof SUPPORTED_EXTENSIONS)[number])) {
     return {
       ok: false,
-      error: `Unsupported file type. Use ${SUPPORTED_EXTENSIONS.join(", ")}.`,
+      error: UNSUPPORTED_FILE_TYPE_MESSAGE,
     };
   }
 
@@ -138,17 +149,43 @@ export function validateMediaFile(file: File | null): ValidationResult {
     };
   }
 
-  if (file.size > MAX_FILE_SIZE_BYTES) {
-    return {
-      ok: false,
-      error: `File is too large. Keep uploads under ${MAX_FILE_SIZE_LABEL} for reliable local processing.`,
-    };
-  }
-
   return {
     ok: true,
     extension,
     mediaKind: VIDEO_EXTENSIONS.has(extension) ? "video" : "audio",
+  };
+}
+
+export async function validateMediaImport(
+  file: File | null,
+  storageState?: BrowserStorageState | null,
+): Promise<ValidationResult> {
+  const baseValidation = validateMediaFile(file);
+
+  if (!baseValidation.ok || !file) {
+    return baseValidation;
+  }
+
+  const capacity = await validateLocalStorageCapacity(file.size, storageState);
+
+  if (!capacity.ok) {
+    return {
+      ...baseValidation,
+      ok: false,
+      availableStorageBytes: capacity.availableBytes,
+      requiredStorageBytes: capacity.requiredBytes,
+      error: `Not enough local storage for this recording. This file needs about ${formatBytes(
+        capacity.requiredBytes ?? file.size,
+      )}; available local storage is about ${formatBytes(
+        capacity.availableBytes ?? 0,
+      )}. Free space or choose a smaller file.`,
+    };
+  }
+
+  return {
+    ...baseValidation,
+    availableStorageBytes: capacity.availableBytes,
+    requiredStorageBytes: capacity.requiredBytes,
   };
 }
 
@@ -261,7 +298,7 @@ async function extractWithFFmpeg(file: File, callbacks: PreparationCallbacks): P
 
   const { fetchFile } = await import("@ffmpeg/util");
   const extension = getFileExtension(file.name) || ".media";
-  const safeBaseName = file.name.replace(/[^a-z0-9]/gi, "-").toLowerCase() || "upload";
+  const safeBaseName = file.name.replace(/[^a-z0-9]/gi, "-").toLowerCase() || "recording";
   const inputName = `${safeBaseName}${extension}`;
   const outputName = `${safeBaseName}-audio.wav`;
 
@@ -320,6 +357,11 @@ export async function prepareAudioForTranscription(
     throw new Error(validation.error ?? "Choose a supported media file.");
   }
 
+  const localPreparationRisk = getLocalPreparationRisk(file.size, validation.mediaKind);
+  if (localPreparationRisk) {
+    throw new LocalPreparationRiskError(localPreparationRisk);
+  }
+
   if (validation.mediaKind === "video") {
     return extractWithFFmpeg(file, callbacks);
   }
@@ -374,13 +416,45 @@ export function humanizePreparationError(error: unknown) {
     }
 
     if (message.includes("memory") || message.includes("out of memory")) {
-      return "That recording used more browser memory than was available. Try a shorter or smaller file.";
+      return "Could not process this file locally. Try again or use a shorter recording.";
     }
 
     return error.message;
   }
 
-  return `Getting the recording ready failed. Try a smaller file under ${MAX_FILE_SIZE_LABEL} (${formatBytes(
-    MAX_FILE_SIZE_BYTES,
-  )}) or switch browsers.`;
+  return "Could not process this file locally. Try again or use a shorter recording.";
+}
+
+function getLocalPreparationRisk(fileSize: number, mediaKind: "audio" | "video") {
+  if (typeof navigator === "undefined") {
+    return null;
+  }
+
+  const deviceMemory =
+    (navigator as Navigator & {
+      deviceMemory?: number;
+    }).deviceMemory;
+
+  if (!Number.isFinite(deviceMemory) || !deviceMemory) {
+    return null;
+  }
+
+  const memoryBudgetBytes =
+    deviceMemory *
+    1024 *
+    1024 *
+    1024 *
+    (mediaKind === "video" ? 0.08 : 0.12);
+
+  if (fileSize <= memoryBudgetBytes) {
+    return null;
+  }
+
+  return `This recording is saved on this device, but this browser may not have enough memory to process ${formatBytes(
+    fileSize,
+  )} locally in one pass. Try again on a desktop browser or use a shorter recording.`;
+}
+
+export function getSupportedFormatLabels() {
+  return [...SUPPORTED_FORMAT_LABELS];
 }

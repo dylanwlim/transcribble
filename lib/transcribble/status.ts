@@ -34,6 +34,12 @@ const STAGE_COPY: Record<ProjectStep, StageCopy> = {
     summary: "Listening locally and building the transcript on this device.",
     tone: "working",
   },
+  paused: {
+    badgeLabel: "Saved",
+    headline: "Saved and waiting",
+    summary: "Saved on this device. This browser may need more runtime room before it can continue.",
+    tone: "warning",
+  },
   saving: {
     badgeLabel: "Saving",
     headline: "Saving your session",
@@ -81,6 +87,8 @@ export function getDefaultProjectStep(status: ProjectStatus): ProjectStep {
       return "getting-browser-ready";
     case "transcribing":
       return "transcribing";
+    case "paused":
+      return "paused";
     case "ready":
       return "ready";
     case "error":
@@ -139,6 +147,20 @@ export function getProjectViewState(
       transcriptBadgeLabel: "No transcript yet",
       transcriptSearchPlaceholder: "Search unlocks after the transcript is ready",
       transcriptEmptyTitle: "This recording could not finish yet",
+      transcriptEmptyBody: status.summary,
+    };
+  }
+
+  if (status.step === "paused") {
+    return {
+      ...status,
+      canUseTranscript: false,
+      canSearchTranscript: false,
+      canExport: false,
+      canSaveRanges: false,
+      transcriptBadgeLabel: "Saved and waiting",
+      transcriptSearchPlaceholder: "Search unlocks after the transcript is ready",
+      transcriptEmptyTitle: "Saved and waiting",
       transcriptEmptyBody: status.summary,
     };
   }

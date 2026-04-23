@@ -148,6 +148,7 @@ export function Stage(props: StageProps) {
   };
 
   const isError = project.status === "error";
+  const isPaused = project.status === "paused";
   const isReady = project.status === "ready";
   const bookmarkActive = marks.some(
     (mark) => mark.kind === "bookmark" && mark.segmentId === focusedSegmentId,
@@ -241,6 +242,28 @@ export function Stage(props: StageProps) {
           warming={warmingSetup}
           onPrime={onPrimeSetup}
         />
+      ) : null}
+
+      {isPaused ? (
+        <div className="mx-6 mt-3 flex items-start justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-[12px] leading-5 text-foreground animate-rise-in">
+          <div className="flex min-w-0 items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+            <div className="min-w-0">
+              <div className="font-medium">Saved locally, waiting to continue.</div>
+              <div className="mt-0.5 text-muted-foreground">
+                {project.detail}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] font-medium hover:bg-muted ring-focus"
+          >
+            <RotateCw className="h-3.5 w-3.5" />
+            Try again
+          </button>
+        </div>
       ) : null}
 
       {isError ? (

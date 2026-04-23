@@ -124,8 +124,13 @@ async function writeFileToOpfs(projectId: string, file: File) {
   const opfsFileName = createOpfsFileName(projectId, file.name);
   const handle = await directory.getFileHandle(opfsFileName, { create: true });
   const writable = await handle.createWritable();
-  await writable.write(file);
-  await writable.close();
+
+  if (typeof file.stream === "function" && typeof writable.write === "function") {
+    await file.stream().pipeTo(writable);
+  } else {
+    await writable.write(file);
+    await writable.close();
+  }
 
   return {
     projectId,

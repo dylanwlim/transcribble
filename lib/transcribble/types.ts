@@ -14,6 +14,7 @@ export type ProjectStep =
   | "getting-browser-ready"
   | "getting-recording-ready"
   | "transcribing"
+  | "paused"
   | "saving"
   | "ready"
   | "error";

@@ -23,7 +23,7 @@ It is not a chatbot shell and it is not a hosted transcription dashboard. The co
 
 - No paid API is required for the core workflow
 - No mandatory cloud backend is required for the core workflow
-- Recordings and transcript work stay in browser storage on this device
+- Recordings and transcripts stay in browser storage on this device
 - Search, review cues, summaries, questions, dates, glossary terms, and saved review ranges are built locally
 
 ## First-Time Setup And Offline Caveat
@@ -53,8 +53,9 @@ Existing saved projects are preserved. The storage change is additive and falls 
 
 The app also surfaces:
 
-- whether the browser reports durable storage protection
-- storage usage and quota when the browser exposes it
+- whether the browser granted persistent local storage
+- storage usage and available local space when the browser exposes it
+- quota-aware import checks instead of a fixed file-size cap
 - whether larger recordings can use the private file system
 - browser notes that affect local reliability
 
@@ -113,6 +114,6 @@ npm run validate
 
 - Speaker turns are still pause-derived. Real diarization and a full manual speaker workflow are not implemented.
 - First-run offline use still depends on one online setup
-- Browser memory limits still apply to very large recordings
+- Very large recordings can still be saved locally when storage allows it, but browser memory limits may pause local processing until you retry on stronger hardware
 - Some browsers do not expose durable storage or private file system support
 - Whole-workspace backup and re-import are not implemented yet

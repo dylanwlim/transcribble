@@ -1,11 +1,18 @@
 "use client";
 
-import { Check, Download, Loader2, RotateCcw, Shield, X } from "lucide-react";
-import { useEffect } from "react";
+import { Check, Download, Loader2, RotateCcw, Shield, Wifi, WifiOff, X } from "lucide-react";
+import React, { useEffect, useId, useRef } from "react";
 
+import {
+  IMPORT_FILE_LABEL,
+  SETTINGS_MODAL_TITLE,
+  SETTINGS_PRIVACY_COPY,
+  SETTINGS_SECTION_LABEL,
+} from "@/lib/transcribble/constants";
 import { cn } from "@/lib/utils";
-import { formatBytes } from "@/lib/transcribble/transcript";
+import { buildStorageStatus } from "@/lib/transcribble/storage";
 import { ThemeToggle } from "./theme-toggle";
+import { KeyboardShortcut } from "./keyboard-shortcut";
 
 interface SettingsSheetProps {
   open: boolean;
@@ -20,12 +27,16 @@ interface SettingsSheetProps {
   onResetSetup: () => void;
   storagePersisted: boolean | null;
   storageUsed: number | null;
-  storageQuota: number | null;
+  storageAvailable: number | null;
+  storageCanRequestPersistence: boolean;
   onAskForPersistent: () => void | Promise<void>;
   installPromptAvailable: boolean;
   installed: boolean;
   onInstall: () => void | Promise<void>;
 }
+
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function SettingsSheet({
   open,
@@ -40,103 +51,204 @@ export function SettingsSheet({
   onResetSetup,
   storagePersisted,
   storageUsed,
-  storageQuota,
+  storageAvailable,
+  storageCanRequestPersistence,
   onAskForPersistent,
   installPromptAvailable,
   installed,
   onInstall,
 }: SettingsSheetProps) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
+
+    previousFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    const frame = window.requestAnimationFrame(() => {
+      const panel = panelRef.current;
+      if (!panel) {
+        return;
+      }
+
+      const firstFocusable = panel.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+      firstFocusable?.focus();
+    });
+
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (!panelRef.current) {
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const focusable = Array.from(panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      if (focusable.length === 0) {
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      const active = document.activeElement;
+
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first?.focus();
+      }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+
+    document.addEventListener("keydown", onKey);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", onKey);
+      previousFocusRef.current?.focus();
+    };
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open) {
+    return null;
+  }
+
+  const storageSummary = buildStorageStatus(storageUsed, storageAvailable);
+  const persistentStorageDetail =
+    storagePersisted === true
+      ? "Browser granted persistent local storage"
+      : storagePersisted === false
+        ? "Browser may clear data under storage pressure"
+        : "Not reported by this browser";
 
   return (
     <div
       role="dialog"
-      aria-modal
-      aria-label="Settings"
-      className="fixed inset-0 z-50 flex items-center justify-center px-4 animate-fade-in"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      aria-describedby={descriptionId}
+      className="fixed inset-0 z-50 flex items-end justify-center px-3 pb-3 pt-6 animate-fade-in sm:items-center sm:px-4"
     >
-      <div
+      <button
+        type="button"
+        aria-label="Close settings"
         className="absolute inset-0 bg-foreground/20 backdrop-blur-[2px]"
         onClick={onClose}
       />
+
       <div
+        ref={panelRef}
         className={cn(
-          "relative w-full max-w-lg overflow-hidden rounded-xl border border-border bg-popover shadow-[var(--shadow-float)]",
-          "animate-sheet-in",
+          "relative flex w-full max-w-[42rem] flex-col overflow-hidden rounded-2xl border border-border bg-popover shadow-[var(--shadow-float)]",
+          "max-h-[min(90dvh,44rem)] animate-sheet-in",
         )}
       >
-        <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
-          <div>
-            <div className="text-[10px] font-medium uppercase tracking-wider text-subtle">
-              Settings
+        <p id={descriptionId} className="sr-only">
+          Manage local tools, storage, appearance, and shortcuts for this local workspace.
+        </p>
+
+        <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-5">
+          <div className="min-w-0">
+            <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-subtle">
+              {SETTINGS_SECTION_LABEL}
             </div>
-            <div className="text-[14px] font-semibold">Local workspace</div>
+            <div id={titleId} className="mt-1 text-[15px] font-semibold tracking-tight text-foreground">
+              {SETTINGS_MODAL_TITLE}
+            </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
-            className="rounded p-1 text-subtle hover:bg-muted hover:text-foreground ring-focus"
+            aria-label="Close settings"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-subtle transition-colors duration-150 hover:bg-muted hover:text-foreground ring-focus"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="scroll-y max-h-[70vh] px-5 py-4">
+        <div className="scroll-y flex-1 px-4 py-4 sm:px-5">
           <Block title="Local tools">
             <Row
               label="Transcription model"
-              detail={modelReady ? "Ready on this device" : online ? "Not downloaded yet" : "Go online once to download"}
+              detail={
+                modelReady
+                  ? "Downloaded on this device"
+                  : online
+                    ? "Not downloaded yet"
+                    : "Go online once to download"
+              }
               ready={modelReady}
             >
               {!modelReady ? (
-                <button
-                  type="button"
+                <ActionButton
                   onClick={() => void onPrimeModel()}
                   disabled={warmingModel || !online}
-                  className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[12px] hover:bg-muted disabled:opacity-50 ring-focus"
                 >
                   {warmingModel ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
                   {warmingModel ? "Downloading" : "Download"}
-                </button>
+                </ActionButton>
               ) : null}
             </Row>
+
             <Row
               label="Video runtime"
-              detail={mediaReady ? "Ready for video" : online ? "Not downloaded yet" : "Go online once to download"}
+              detail={
+                mediaReady
+                  ? "Ready for video imports and fallback media work"
+                  : online
+                    ? "Not downloaded yet"
+                    : "Go online once to download"
+              }
               ready={mediaReady}
             >
               {!mediaReady ? (
-                <button
-                  type="button"
+                <ActionButton
                   onClick={() => void onPrimeMedia()}
                   disabled={warmingMedia || !online}
-                  className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[12px] hover:bg-muted disabled:opacity-50 ring-focus"
                 >
                   {warmingMedia ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
                   {warmingMedia ? "Downloading" : "Download"}
-                </button>
+                </ActionButton>
               ) : null}
             </Row>
-            <div className="mt-2 flex items-center justify-between text-[11px]">
-              <span className="text-subtle">
+
+            <Row
+              label="Browser connection"
+              detail={online ? "Online" : "Offline"}
+              ready={online}
+            >
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full border border-border-strong px-2.5 py-1 text-[11px] font-medium",
+                  online ? "text-success" : "text-warning",
+                )}
+              >
+                {online ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
                 {online ? "Online" : "Offline"}
               </span>
+            </Row>
+
+            <div className="pt-1">
               <button
                 type="button"
                 onClick={onResetSetup}
-                className="inline-flex items-center gap-1 text-subtle hover:text-foreground ring-focus"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[12px] text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground ring-focus"
               >
-                <RotateCcw className="h-3 w-3" />
+                <RotateCcw className="h-3.5 w-3.5" />
                 Reset setup status
               </button>
             </div>
@@ -145,34 +257,19 @@ export function SettingsSheet({
           <Block title="Storage">
             <Row
               label="Local storage"
-              detail={
-                storageUsed !== null && storageQuota
-                  ? `${formatBytes(storageUsed)} used · ${formatBytes(storageQuota)} available`
-                  : storageUsed !== null
-                    ? `${formatBytes(storageUsed)} used`
-                    : "Local storage"
-              }
+              detail={storageSummary.summary}
             />
+
             <Row
-              label="Durable"
-              detail={
-                storagePersisted === true
-                  ? "Browser confirms this data is protected"
-                  : storagePersisted === false
-                    ? "Browser may clear files under pressure"
-                    : "Not reported by this browser"
-              }
+              label="Persistent storage"
+              detail={persistentStorageDetail}
               ready={storagePersisted === true}
             >
-              {storagePersisted !== true ? (
-                <button
-                  type="button"
-                  onClick={() => void onAskForPersistent()}
-                  className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[12px] hover:bg-muted ring-focus"
-                >
+              {storageCanRequestPersistence && storagePersisted !== true ? (
+                <ActionButton onClick={() => void onAskForPersistent()}>
                   <Shield className="h-3 w-3" />
                   Ask browser
-                </button>
+                </ActionButton>
               ) : null}
             </Row>
           </Block>
@@ -185,41 +282,35 @@ export function SettingsSheet({
                 ready={installed}
               >
                 {installPromptAvailable && !installed ? (
-                  <button
-                    type="button"
-                    onClick={() => void onInstall()}
-                    className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[12px] hover:bg-muted ring-focus"
-                  >
+                  <ActionButton onClick={() => void onInstall()}>
                     <Download className="h-3 w-3" />
                     Install
-                  </button>
+                  </ActionButton>
                 ) : null}
               </Row>
             </Block>
           ) : null}
 
           <Block title="Appearance">
-            <div className="flex items-center justify-between py-2">
-              <div className="text-[12px] text-foreground">Theme</div>
+            <Row label="Theme" detail="System, light, or dark">
               <ThemeToggle />
-            </div>
+            </Row>
           </Block>
 
           <Block title="Shortcuts">
-            <ShortcutRow label="Play / pause" keys={["Space"]} />
-            <ShortcutRow label="Previous / next segment" keys={["K", "J"]} />
-            <ShortcutRow label="Toggle bookmark" keys={["B"]} />
-            <ShortcutRow label="Search library" keys={["⌘", "K"]} />
-            <ShortcutRow label="Find in transcript" keys={["/"]} />
-            <ShortcutRow label="Import file" keys={["⌘", "O"]} />
-            <ShortcutRow label="Export" keys={["⌘", "E"]} />
-            <ShortcutRow label="Toggle inspector" keys={["⌘", "\\"]} />
-            <ShortcutRow label="Settings" keys={["⌘", ","]} />
+            <ShortcutRow label="Play / pause" shortcutId="play-pause" />
+            <ShortcutRow label="Previous / next segment" shortcutId="prev-next-segment" />
+            <ShortcutRow label="Toggle bookmark" shortcutId="toggle-bookmark" />
+            <ShortcutRow label="Search library" shortcutId="search-library" />
+            <ShortcutRow label="Find in transcript" shortcutId="search-transcript" />
+            <ShortcutRow label={IMPORT_FILE_LABEL} shortcutId="add-recording" />
+            <ShortcutRow label="Export" shortcutId="export" />
+            <ShortcutRow label="Toggle inspector" shortcutId="toggle-inspector" />
+            <ShortcutRow label="Settings" shortcutId="settings" />
           </Block>
 
-          <div className="pt-2 text-[11px] leading-5 text-subtle">
-            Recordings and transcript work stay in browser storage on this device.
-            Transcribble does not upload your recordings.
+          <div className="rounded-xl bg-muted/40 px-3 py-3 text-[11px] leading-5 text-muted-foreground">
+            {SETTINGS_PRIVACY_COPY}
           </div>
         </div>
       </div>
@@ -229,8 +320,8 @@ export function SettingsSheet({
 
 function Block({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="mb-5">
-      <h3 className="mb-2 text-[10px] font-medium uppercase tracking-wider text-subtle">
+    <section className="mb-6">
+      <h3 className="mb-3 text-[10px] font-medium uppercase tracking-[0.18em] text-subtle">
         {title}
       </h3>
       <div className="space-y-2">{children}</div>
@@ -250,33 +341,60 @@ function Row({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center gap-3 py-1">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 text-[13px] font-medium">
-          {ready ? <Check className="h-3 w-3 text-success" /> : null}
-          {label}
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-border/80 bg-surface/70 px-3 py-3">
+      <div className="min-w-0">
+        <div className="flex items-center gap-1.5 text-[13px] font-medium text-foreground">
+          {ready ? <Check className="h-3.5 w-3.5 text-success" /> : null}
+          <span>{label}</span>
         </div>
-        {detail ? <div className="text-[11px] text-muted-foreground">{detail}</div> : null}
+        {detail ? <div className="mt-0.5 text-[11px] leading-5 text-muted-foreground">{detail}</div> : null}
       </div>
       {children}
     </div>
   );
 }
 
-function ShortcutRow({ label, keys }: { label: string; keys: string[] }) {
+function ActionButton({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
   return (
-    <div className="flex items-center justify-between py-1 text-[12px]">
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[12px] text-foreground transition-colors duration-150 hover:bg-muted disabled:opacity-50 ring-focus"
+    >
+      {children}
+    </button>
+  );
+}
+
+function ShortcutRow({
+  label,
+  shortcutId,
+}: {
+  label: string;
+  shortcutId:
+    | "play-pause"
+    | "prev-next-segment"
+    | "toggle-bookmark"
+    | "search-library"
+    | "search-transcript"
+    | "add-recording"
+    | "export"
+    | "toggle-inspector"
+    | "settings";
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-border/80 bg-surface/70 px-3 py-2.5 text-[12px]">
       <span className="text-muted-foreground">{label}</span>
-      <span className="flex items-center gap-1">
-        {keys.map((key) => (
-          <kbd
-            key={key}
-            className="inline-flex min-w-[1.5rem] items-center justify-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] text-foreground mono"
-          >
-            {key}
-          </kbd>
-        ))}
-      </span>
+      <KeyboardShortcut shortcutId={shortcutId} />
     </div>
   );
 }

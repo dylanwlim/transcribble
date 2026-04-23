@@ -23,8 +23,9 @@ import {
   getInputAcceptValue,
   getLocalInferenceCapabilityIssue,
   humanizePreparationError,
+  LocalPreparationRiskError,
   prepareAudioForTranscription,
-  validateMediaFile,
+  validateMediaImport,
   warmMediaRuntime,
 } from "@/lib/transcribble/media";
 import {
@@ -283,6 +284,12 @@ export function useTranscribble() {
     writeStoredJson(UI_STATE_KEY, { selectedProjectId: projectId } satisfies PersistedUiState);
   }, []);
 
+  const refreshStorageState = useCallback(async () => {
+    const nextState = await readBrowserStorageState();
+    setStorageState(nextState);
+    return nextState;
+  }, []);
+
   const applyProjectUpdate = useCallback(
     (
       projectId: string,
@@ -489,6 +496,29 @@ export function useTranscribble() {
       setNotice({
         tone: "error",
         message: failureSummary,
+      });
+      finishJob();
+    },
+    [applyProjectUpdate, finishJob],
+  );
+
+  const pauseProjectAfterImport = useCallback(
+    (projectId: string, message: string) => {
+      applyProjectUpdate(
+        projectId,
+        (project) =>
+          applyProjectStep(project, {
+            status: "paused",
+            step: "paused",
+            progress: 0,
+            detail: message,
+            error: undefined,
+          }),
+        { persist: true },
+      );
+      setNotice({
+        tone: "error",
+        message,
       });
       finishJob();
     },
@@ -843,10 +873,23 @@ export function useTranscribble() {
           return;
         }
 
+        if (error instanceof LocalPreparationRiskError) {
+          pauseProjectAfterImport(project.id, error.message);
+          return;
+        }
+
         finishProjectWithError(project.id, humanizePreparationError(error));
       }
     },
-    [applyProjectUpdate, capabilityIssue, finishProjectWithError, getWorker, markMediaPrimed, runtime],
+    [
+      applyProjectUpdate,
+      capabilityIssue,
+      finishProjectWithError,
+      getWorker,
+      markMediaPrimed,
+      pauseProjectAfterImport,
+      runtime,
+    ],
   );
 
   useEffect(() => {
@@ -1055,9 +1098,10 @@ export function useTranscribble() {
 
       const nextProjects: TranscriptProject[] = [];
       const errors: string[] = [];
+      let workingStorageState = storageState;
 
       for (const file of files) {
-        const validation = validateMediaFile(file);
+        const validation = await validateMediaImport(file, workingStorageState);
 
         if (!validation.ok) {
           errors.push(`${file.name}: ${validation.error ?? "Unsupported media file."}`);
@@ -1069,8 +1113,42 @@ export function useTranscribble() {
         try {
           await putProjectWithFile(project, file);
           nextProjects.push(project);
+          workingStorageState =
+            workingStorageState && validation.requiredStorageBytes
+              ? {
+                  ...workingStorageState,
+                  usage:
+                    typeof workingStorageState.usage === "number"
+                      ? workingStorageState.usage + validation.requiredStorageBytes
+                      : workingStorageState.usage,
+                  available:
+                    typeof workingStorageState.available === "number"
+                      ? Math.max(
+                          0,
+                          workingStorageState.available - validation.requiredStorageBytes,
+                        )
+                      : workingStorageState.available,
+                }
+              : workingStorageState;
         } catch {
-          errors.push(`${file.name}: Local storage failed while saving the project. Check browser storage availability.`);
+          const latestStorageState = await refreshStorageState().catch(() => storageState);
+
+          if (
+            validation.requiredStorageBytes &&
+            typeof latestStorageState?.available === "number"
+          ) {
+            errors.push(
+              `${file.name}: Not enough local storage for this recording. This file needs about ${formatBytes(
+                validation.requiredStorageBytes,
+              )}; available local storage is about ${formatBytes(
+                latestStorageState.available,
+              )}. Free space or choose a smaller file.`,
+            );
+          } else {
+            errors.push(
+              `${file.name}: Local storage failed while saving this recording. Check browser storage availability and try again.`,
+            );
+          }
         }
       }
 
@@ -1081,6 +1159,8 @@ export function useTranscribble() {
           setSelectedProjectId(nextProjects[0]?.id ?? null);
           persistProjectSelection(nextProjects[0]?.id ?? null);
         }
+
+        void refreshStorageState();
       }
 
       if (errors.length > 0) {
@@ -1098,7 +1178,7 @@ export function useTranscribble() {
         });
       }
     },
-    [persistProjectSelection, runtime, selectedProjectId],
+    [persistProjectSelection, refreshStorageState, runtime, selectedProjectId, storageState],
   );
 
   const openFilePicker = useCallback(() => {
@@ -1856,7 +1936,7 @@ export function useTranscribble() {
       setAssetProgressItems([]);
       setNotice({
         tone: "info",
-        message: "This browser is ready to open video recordings and handle fallback media work.",
+        message: "Video runtime is ready for local imports and fallback media work.",
       });
     } catch (error) {
       const message = humanizePreparationError(error);
@@ -1873,12 +1953,6 @@ export function useTranscribble() {
     }
   }, [assetSetup.warmingMedia, markMediaPrimed, queuedProjects.length]);
 
-  const refreshStorageState = useCallback(async () => {
-    const nextState = await readBrowserStorageState();
-    setStorageState(nextState);
-    return nextState;
-  }, []);
-
   const askForPersistentStorage = useCallback(async () => {
     const granted = await requestPersistentStorage();
     const nextState = await refreshStorageState();
@@ -1887,8 +1961,8 @@ export function useTranscribble() {
       tone: granted ? "info" : "error",
       message:
         granted || nextState.persisted
-          ? "This browser agreed to help keep Transcribble's local files available."
-          : "This browser did not confirm extra protection for local files. Your work still stays here, but the browser may clear large files more aggressively.",
+          ? "Browser granted persistent local storage for this workspace."
+          : "Browser did not confirm persistent local storage. Your work still stays here, but local files may be cleared under storage pressure.",
     });
   }, [refreshStorageState]);
 
@@ -1936,6 +2010,8 @@ export function useTranscribble() {
                 ? formatDuration(selectedProject.duration)
                 : selectedProject.status === "error"
                   ? "Unavailable"
+                  : selectedProject.status === "paused"
+                    ? "Saved and waiting"
                   : selectedProject.status === "queued"
                     ? "Waiting to start"
                     : selectedProject.step === "getting-browser-ready"
@@ -1947,6 +2023,8 @@ export function useTranscribble() {
               ? RUNTIME_LABELS[selectedProject.runtime]
               : selectedProject.status === "error"
                 ? "Didn't start"
+                : selectedProject.status === "paused"
+                  ? "Saved locally"
                 : "Starting local tools",
             modelLabel: selectedProject.runtime ? MODEL_LABELS[selectedProject.runtime] : "Whisper base timestamped",
             fileSizeLabel: formatBytes(selectedProject.sourceSize),

@@ -5,6 +5,12 @@ import { AlertTriangle, Menu, Settings2, Upload, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useTranscribble } from "@/hooks/use-transcribble";
+import {
+  ADD_RECORDING_LABEL,
+  SETTINGS_OPEN_LABEL,
+  SUPPORTED_FORMAT_LABELS,
+} from "@/lib/transcribble/constants";
+import { formatShortcutTitle } from "@/lib/transcribble/shortcuts";
 import { getProjectViewState } from "@/lib/transcribble/status";
 import type { HighlightColor } from "@/lib/transcribble/types";
 
@@ -220,10 +226,7 @@ export function TranscribbleApp() {
 
   const emptyState = !selectedProject && projects.length === 0;
   const effectiveNotice = notice ?? (capabilityIssue ? { tone: "error" as const, message: capabilityIssue } : null);
-  const supportedFormats = accept
-    .split(",")
-    .map((value) => value.replace(".", "").trim().toUpperCase())
-    .filter(Boolean);
+  const supportedFormats = SUPPORTED_FORMAT_LABELS;
 
   const renderSidebar = ({
     closeOnAction = false,
@@ -270,10 +273,14 @@ export function TranscribbleApp() {
           void toggleRecording();
           finishAction();
         }}
+        onOpenSettings={() => {
+          openSettings();
+          finishAction();
+        }}
         isRecording={isRecording}
         librarySearchRef={librarySearchRef}
         storageUsedBytes={storageState?.usage ?? null}
-        storageQuotaBytes={storageState?.quota ?? null}
+        storageAvailableBytes={storageState?.available ?? null}
         storagePersisted={storageState?.persisted ?? null}
         modelReady={assetSetup.modelReady}
         mediaReady={assetSetup.mediaReady}
@@ -397,6 +404,34 @@ export function TranscribbleApp() {
 
           <SettingsLaunch onOpen={openSettings} />
         </main>
+
+        {effectiveNotice && !settingsOpen && !exportOpen && !paletteOpen ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 flex justify-center px-4 pb-1 sm:px-6">
+            <div
+              role={effectiveNotice.tone === "error" ? "alert" : "status"}
+              aria-live={effectiveNotice.tone === "error" ? "assertive" : "polite"}
+              className={cn(
+                "pointer-events-auto flex w-full max-w-[min(36rem,100%)] items-start gap-3 rounded-2xl border border-border bg-popover px-4 py-3 text-[12px] shadow-[var(--shadow-float)]",
+                effectiveNotice.tone === "error" ? "border-warning/40" : "",
+              )}
+            >
+              {effectiveNotice.tone === "error" ? (
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+              ) : (
+                <span className="mt-[0.35rem] inline-flex h-2 w-2 shrink-0 rounded-full bg-success" />
+              )}
+              <span className="min-w-0 flex-1 leading-5">{effectiveNotice.message}</span>
+              <button
+                type="button"
+                onClick={() => setNotice(null)}
+                className="rounded-full p-1 text-subtle transition-colors duration-150 hover:bg-muted hover:text-foreground ring-focus"
+                aria-label="Dismiss notification"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <MobileSidebarDrawer open={mobileSidebarOpen} onClose={() => setMobileSidebarOpen(false)}>
@@ -416,34 +451,6 @@ export function TranscribbleApp() {
           ),
         })}
       </MobileSidebarDrawer>
-
-      {effectiveNotice ? (
-        <div className="pointer-events-none fixed bottom-5 left-1/2 z-40 -translate-x-1/2 animate-rise-in">
-          <div
-            className={cn(
-              "pointer-events-auto flex max-w-md items-center gap-2 rounded-full border border-border bg-popover px-4 py-2 text-[12px] shadow-[var(--shadow-float)]",
-              effectiveNotice.tone === "error"
-                ? "text-foreground border-warning/40"
-                : "text-foreground",
-            )}
-          >
-            {effectiveNotice.tone === "error" ? (
-              <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warning" />
-            ) : (
-              <span className="inline-flex h-1.5 w-1.5 rounded-full bg-success" />
-            )}
-            <span className="flex-1 leading-5">{effectiveNotice.message}</span>
-            <button
-              type="button"
-              onClick={() => setNotice(null)}
-              className="rounded p-1 text-subtle hover:bg-muted hover:text-foreground ring-focus"
-              aria-label="Dismiss"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </div>
-        </div>
-      ) : null}
 
       <ExportSheet
         open={exportOpen}
@@ -467,7 +474,8 @@ export function TranscribbleApp() {
         onResetSetup={resetSetupState}
         storagePersisted={storageState?.persisted ?? null}
         storageUsed={storageState?.usage ?? null}
-        storageQuota={storageState?.quota ?? null}
+        storageAvailable={storageState?.available ?? null}
+        storageCanRequestPersistence={storageState?.canRequestPersistence ?? false}
         onAskForPersistent={askForPersistentStorage}
         installPromptAvailable={installState.installPromptAvailable}
         installed={installState.installed}
@@ -542,7 +550,7 @@ function MobileHeader({
       <button
         type="button"
         onClick={onImport}
-        aria-label="Add a recording"
+        aria-label={ADD_RECORDING_LABEL}
         className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-subtle shadow-[var(--shadow-soft)] transition-colors duration-150 hover:bg-muted hover:text-foreground ring-focus"
       >
         <Upload className="h-4 w-4" />
@@ -550,7 +558,7 @@ function MobileHeader({
       <button
         type="button"
         onClick={onOpenSettings}
-        aria-label="Open settings"
+        aria-label={SETTINGS_OPEN_LABEL}
         className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-subtle shadow-[var(--shadow-soft)] transition-colors duration-150 hover:bg-muted hover:text-foreground ring-focus"
       >
         <Settings2 className="h-4 w-4" />
@@ -595,8 +603,8 @@ function SettingsLaunch({ onOpen }: { onOpen: () => void }) {
     <button
       type="button"
       onClick={onOpen}
-      aria-label="Open settings"
-      title="Settings (⌘,)"
+      aria-label={SETTINGS_OPEN_LABEL}
+      title={`${SETTINGS_OPEN_LABEL} (${formatShortcutTitle("settings")})`}
       className={cn(
         "absolute bottom-[max(var(--workspace-floating-offset),env(safe-area-inset-bottom))] right-[max(var(--workspace-floating-offset),env(safe-area-inset-right))] z-30 hidden h-11 w-11 items-center justify-center rounded-full lg:flex",
         "border border-border bg-surface text-subtle shadow-[var(--shadow-soft)]",

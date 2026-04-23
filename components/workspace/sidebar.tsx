@@ -19,14 +19,22 @@ import {
   Video,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
-import { formatBytes, formatDuration } from "@/lib/transcribble/transcript";
+import {
+  ADD_RECORDING_HELPER,
+  ADD_RECORDING_LABEL,
+  SETTINGS_OPEN_LABEL,
+  SETTINGS_SIDEBAR_LABEL,
+} from "@/lib/transcribble/constants";
+import { buildStorageStatus } from "@/lib/transcribble/storage";
+import { formatDuration } from "@/lib/transcribble/transcript";
 import type {
   LibrarySearchResult,
   TranscriptProject,
 } from "@/lib/transcribble/types";
+import { KeyboardShortcut } from "./keyboard-shortcut";
 
 interface SidebarProps {
   projects: TranscriptProject[];
@@ -43,10 +51,11 @@ interface SidebarProps {
   onTogglePin: (id: string) => void;
   onReorder: (sourceId: string, targetId: string, position: "before" | "after") => void;
   onToggleRecording: () => void | Promise<void>;
+  onOpenSettings: () => void;
   isRecording: boolean;
   librarySearchRef: React.Ref<HTMLInputElement>;
   storageUsedBytes: number | null;
-  storageQuotaBytes: number | null;
+  storageAvailableBytes: number | null;
   storagePersisted: boolean | null;
   modelReady: boolean;
   mediaReady: boolean;
@@ -83,6 +92,15 @@ function StatusDot({ project }: { project: TranscriptProject }) {
         title="Needs attention"
         aria-label="Needs attention"
         className="flex h-2 w-2 shrink-0 items-center justify-center rounded-full bg-warning"
+      />
+    );
+  }
+  if (project.status === "paused") {
+    return (
+      <span
+        title="Saved and waiting"
+        aria-label="Saved and waiting"
+        className="flex h-2 w-2 shrink-0 rounded-full bg-transparent ring-1 ring-inset ring-warning"
       />
     );
   }
@@ -137,7 +155,8 @@ function ProjectRow({
     project.status === "preparing" ||
     project.status === "loading-model" ||
     project.status === "transcribing";
-  const isError = project.status === "error";
+  const isRetryable = project.status === "error" || project.status === "paused";
+  const statusMessageTone = project.status === "error" ? "text-warning" : "text-muted-foreground";
   const progress = Math.max(0, Math.min(100, project.progress));
 
   useEffect(() => {
@@ -182,112 +201,122 @@ function ProjectRow({
         onDropOnRow(project.id, position);
       }}
       className={cn(
-        "group relative rounded-lg px-3 py-2.5 transition-colors duration-150",
-        "cursor-pointer",
-        selected
-          ? "bg-muted/80"
-          : "hover:bg-muted/50",
+        "group relative rounded-lg transition-colors duration-150",
+        selected ? "bg-muted/80" : "hover:bg-muted/50",
         dropHint === "before" && "shadow-[inset_0_2px_0_0_hsl(var(--primary))]",
         dropHint === "after" && "shadow-[inset_0_-2px_0_0_hsl(var(--primary))]",
       )}
-      onClick={() => {
-        if (renaming) return;
-        onOpen();
-      }}
-      onKeyDown={(event) => {
-        if (renaming) return;
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onOpen();
-        }
-      }}
-      tabIndex={0}
     >
-      <div className="flex items-center gap-2">
-        <StatusDot project={project} />
-        <div className="min-w-0 flex-1">
-          {renaming ? (
-            <input
-              ref={renameRef}
-              type="text"
-              value={titleDraft}
-              onChange={(event) => setTitleDraft(event.target.value)}
-              onBlur={commitRename}
-              onClick={(event) => event.stopPropagation()}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  commitRename();
-                }
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setTitleDraft(project.title);
-                  setRenaming(false);
-                }
-              }}
-              className="w-full bg-transparent text-sm font-medium leading-tight text-foreground outline-none ring-focus rounded"
-              aria-label="Rename recording"
-            />
-          ) : (
-            <div className="flex items-center gap-1.5">
-              {project.pinned ? (
-                <Pin className="h-3 w-3 shrink-0 text-subtle" aria-label="Pinned" />
-              ) : null}
-              <div className="truncate text-sm font-medium leading-tight text-foreground">
-                {project.title}
+      {renaming ? (
+        <div className="px-3 py-2.5">
+          <div className="flex items-center gap-2 pr-8">
+            <StatusDot project={project} />
+            <div className="min-w-0 flex-1">
+              <input
+                ref={renameRef}
+                type="text"
+                value={titleDraft}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    commitRename();
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setTitleDraft(project.title);
+                    setRenaming(false);
+                  }
+                }}
+                className="w-full rounded bg-transparent text-sm font-medium leading-tight text-foreground outline-none ring-focus"
+                aria-label="Rename recording"
+              />
+              <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-subtle tabular">
+                <span>{formatDate(project.updatedAt)}</span>
+                {duration > 0 ? (
+                  <>
+                    <span className="text-border-strong">·</span>
+                    <span>{formatDuration(duration)}</span>
+                  </>
+                ) : null}
+                {project.mediaKind === "video" ? (
+                  <Video className="h-3 w-3 opacity-50" />
+                ) : null}
               </div>
             </div>
-          )}
-          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-subtle tabular">
-            <span>{formatDate(project.updatedAt)}</span>
-            {duration > 0 ? (
-              <>
-                <span className="text-border-strong">·</span>
-                <span>{formatDuration(duration)}</span>
-              </>
-            ) : null}
-            {project.mediaKind === "video" ? (
-              <Video className="h-3 w-3 opacity-50" />
-            ) : null}
           </div>
         </div>
+      ) : (
         <button
           type="button"
-          aria-label="Session actions"
-          onClick={(event) => {
-            event.stopPropagation();
-            setMenuOpen((open) => !open);
-          }}
-          className={cn(
-            "rounded-md p-1 text-subtle opacity-0 transition-opacity duration-150",
-            "hover:bg-border/40 hover:text-foreground ring-focus",
-            "group-hover:opacity-100 focus-visible:opacity-100",
-            (selected || menuOpen) && "opacity-100",
-          )}
+          onClick={onOpen}
+          className="w-full rounded-lg px-3 py-2.5 text-left ring-focus"
         >
-          <MoreHorizontal className="h-3.5 w-3.5" />
-        </button>
-      </div>
-
-      {isActive ? (
-        <div className="mt-2 flex items-center gap-2">
-          <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-border/60">
-            <div
-              className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out"
-              style={{ width: `${progress}%` }}
-            />
+          <div className="flex items-center gap-2 pr-8">
+            <StatusDot project={project} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                {project.pinned ? (
+                  <Pin className="h-3 w-3 shrink-0 text-subtle" aria-label="Pinned" />
+                ) : null}
+                <div className="truncate text-sm font-medium leading-tight text-foreground">
+                  {project.title}
+                </div>
+              </div>
+              <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-subtle tabular">
+                <span>{formatDate(project.updatedAt)}</span>
+                {duration > 0 ? (
+                  <>
+                    <span className="text-border-strong">·</span>
+                    <span>{formatDuration(duration)}</span>
+                  </>
+                ) : null}
+                {project.mediaKind === "video" ? (
+                  <Video className="h-3 w-3 opacity-50" />
+                ) : null}
+              </div>
+            </div>
           </div>
-          <span className="text-[10px] uppercase tracking-wider text-subtle">
-            {project.stageLabel}
-          </span>
-        </div>
-      ) : null}
 
-      {isError ? (
-        <div className="mt-1.5 text-[11px] leading-4 text-warning">
-          {project.error ?? "Couldn't finish yet"}
-        </div>
-      ) : null}
+          {isActive ? (
+            <div className="mt-2 flex items-center gap-2">
+              <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-border/60">
+                <div
+                  className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+              <span className="text-[10px] uppercase tracking-wider text-subtle">
+                {project.stageLabel}
+              </span>
+            </div>
+          ) : null}
+
+          {isRetryable ? (
+            <div className={cn("mt-1.5 text-[11px] leading-4", statusMessageTone)}>
+              {project.detail || project.error || "Saved and waiting"}
+            </div>
+          ) : null}
+        </button>
+      )}
+
+      <button
+        type="button"
+        aria-label="Session actions"
+        onClick={(event) => {
+          event.stopPropagation();
+          setMenuOpen((open) => !open);
+        }}
+        className={cn(
+          "absolute right-2 top-2 rounded-md p-1 text-subtle opacity-0 transition-opacity duration-150",
+          "hover:bg-border/40 hover:text-foreground ring-focus",
+          "group-hover:opacity-100 focus-visible:opacity-100",
+          (selected || menuOpen) && "opacity-100",
+        )}
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" />
+      </button>
 
       {menuOpen ? (
         <div
@@ -295,7 +324,7 @@ function ProjectRow({
           onClick={(event) => event.stopPropagation()}
           className="absolute right-2 top-9 z-10 w-44 origin-top-right rounded-lg border border-border bg-popover p-1 text-sm shadow-[var(--shadow-float)] animate-rise-in"
         >
-          {isError ? (
+          {isRetryable ? (
             <button
               type="button"
               role="menuitem"
@@ -402,10 +431,11 @@ export function Sidebar({
   onTogglePin,
   onReorder,
   onToggleRecording,
+  onOpenSettings,
   isRecording,
   librarySearchRef,
   storageUsedBytes,
-  storageQuotaBytes,
+  storageAvailableBytes,
   storagePersisted,
   modelReady,
   mediaReady,
@@ -425,19 +455,20 @@ export function Sidebar({
           p.status === "loading-model" ||
           p.status === "transcribing",
       ),
-      ready: projects.filter((p) => p.status === "ready" || p.status === "error"),
+      ready: projects.filter((p) => p.status === "ready" || p.status === "error" || p.status === "paused"),
     }),
     [projects],
   );
 
-  const storageLabel =
-    storageUsedBytes !== null && storageQuotaBytes && storageQuotaBytes > 0
-      ? `${formatBytes(storageUsedBytes)} / ${formatBytes(storageQuotaBytes)}`
-      : storageUsedBytes !== null
-        ? formatBytes(storageUsedBytes)
-        : "Storage local";
-
+  const storageSummary = buildStorageStatus(storageUsedBytes, storageAvailableBytes);
   const allReady = modelReady && mediaReady;
+  const setupStatusTitle = allReady
+    ? online
+      ? "Local tools ready"
+      : "Local tools ready offline"
+    : online
+      ? "One-time setup needed"
+      : "Go online once for setup";
 
   return (
     <aside className={cn("flex h-full min-h-0 w-full flex-col border-r border-border bg-surface", className)}>
@@ -481,9 +512,10 @@ export function Sidebar({
               <X className="h-3 w-3" />
             </button>
           ) : showSearchShortcut ? (
-            <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 select-none rounded-full border border-border-strong bg-background/80 px-1.5 py-0.5 text-[10px] text-muted-foreground mono">
-              ⌘K
-            </span>
+            <KeyboardShortcut
+              shortcutId="search-library"
+              className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 select-none"
+            />
           ) : null}
         </div>
       </div>
@@ -498,10 +530,8 @@ export function Sidebar({
           )}
         >
           <Upload className="h-3.5 w-3.5 text-subtle group-hover:text-foreground" />
-          <span>Add recording</span>
-          <span className="ml-auto select-none rounded-full border border-border-strong bg-background/80 px-1.5 py-0.5 text-[10px] text-muted-foreground mono">
-            ⌘O
-          </span>
+          <span>{ADD_RECORDING_LABEL}</span>
+          <KeyboardShortcut shortcutId="add-recording" className="ml-auto select-none" />
         </button>
         <button
           type="button"
@@ -579,10 +609,10 @@ export function Sidebar({
                   Library
                 </div>
                 {ready.length === 0 ? (
-                  <div className="px-2 py-6 text-[12px] leading-5 text-muted-foreground">
-                    Add a recording to begin.
-                  </div>
-                ) : (
+                <div className="px-2 py-6 text-[12px] leading-5 text-muted-foreground">
+                    {ADD_RECORDING_HELPER}
+                </div>
+              ) : (
                   <div className="space-y-0.5">
                     {ready.map((project) => (
                       <ProjectRow
@@ -619,8 +649,13 @@ export function Sidebar({
               <HardDrive className="mt-0.5 h-3.5 w-3.5 shrink-0 text-subtle" />
               <div className="min-w-0">
                 <div className="truncate font-medium text-muted-foreground tabular">
-                  {storageLabel}
+                  {storageSummary.usedLabel}
                 </div>
+                {storageSummary.availableLabel ? (
+                  <div className="mt-0.5 truncate text-[10px] leading-4 text-muted-foreground tabular">
+                    {storageSummary.availableLabel}
+                  </div>
+                ) : null}
                 {storagePersisted === false ? (
                   <div className="mt-1 flex items-start gap-1.5 text-[10px] leading-4 text-muted-foreground">
                     <AlertTriangle className="mt-0.5 h-2.5 w-2.5 shrink-0 text-warning" />
@@ -632,24 +667,23 @@ export function Sidebar({
               </div>
             </div>
           </div>
-          <span
-            title={
-              allReady
-                ? online
-                  ? "Local tools ready"
-                  : "Local tools ready · Offline"
-                : online
-                  ? "One-time setup needed"
-                  : "Offline · setup needs internet"
-            }
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            aria-label={SETTINGS_OPEN_LABEL}
+            title={SETTINGS_OPEN_LABEL}
             className={cn(
-              "inline-flex min-h-8 items-center gap-1 self-start whitespace-nowrap rounded-full border border-border-strong px-2.5 text-[10px] font-medium uppercase tracking-[0.16em]",
-              allReady ? "text-success" : "text-warning",
+              "inline-flex min-h-9 items-center gap-1.5 self-start whitespace-nowrap rounded-full border border-border-strong px-3 text-[10px] font-medium uppercase tracking-[0.16em] ring-focus",
+              "transition-colors duration-150 hover:bg-muted/70",
+              allReady ? "text-success hover:text-success" : "text-warning hover:text-warning",
             )}
           >
             {allReady ? <Check className="h-3 w-3" /> : <CircleDot className="h-3 w-3" />}
-            <span>{allReady ? "Ready" : "Setup"}</span>
-          </span>
+            <span>{SETTINGS_SIDEBAR_LABEL}</span>
+          </button>
+        </div>
+        <div className="mt-2 text-[10px] uppercase tracking-[0.16em] text-subtle">
+          {setupStatusTitle}
         </div>
       </div>
     </aside>

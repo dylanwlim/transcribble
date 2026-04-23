@@ -75,6 +75,7 @@ test("status defaults map to the new plain-English steps", () => {
   assert.equal(getDefaultProjectStep("loading-model"), "getting-browser-ready");
   assert.equal(getDefaultProjectStep("preparing"), "getting-recording-ready");
   assert.equal(getDefaultProjectStep("transcribing"), "transcribing");
+  assert.equal(getDefaultProjectStep("paused"), "paused");
 });
 
 test("getProjectStatusCopy surfaces consistent launch copy", () => {
@@ -130,4 +131,18 @@ test("getProjectViewState keeps failed sessions calm and non-optimistic", () => 
   assert.equal(view.transcriptEmptyTitle, "This recording could not finish yet");
   assert.match(view.transcriptEmptyBody, /still saved on this device/i);
   assert.doesNotMatch(view.transcriptEmptyBody, /ENOENT/);
+});
+
+test("getProjectViewState explains paused local processing clearly", () => {
+  const view = getProjectViewState({
+    ...buildProject(),
+    status: "paused",
+    step: "paused",
+    detail: "Saved on this device. This browser may need more runtime room before it can continue.",
+  });
+
+  assert.equal(view.canUseTranscript, false);
+  assert.equal(view.transcriptBadgeLabel, "Saved and waiting");
+  assert.equal(view.transcriptEmptyTitle, "Saved and waiting");
+  assert.match(view.transcriptEmptyBody, /saved on this device/i);
 });

@@ -19,6 +19,8 @@ Repo truth:
 
 Do not assume:
 - Local-first is true after first setup, not from a cold offline browser profile. The model and media runtime still download once, and `lib/transcribble/media.ts` pulls FFmpeg core from jsDelivr.
+- Import validation is quota-aware. Do not reintroduce a fixed file-size cap or “upload” language for local recording imports.
+- Very large recordings may save successfully but pause local processing when browser memory is not strong enough for one-pass preparation. Treat that as a truthful saved-local state, not a rejected import.
 - The committed product is still import-first. If this checkout has extra UI work in progress, inspect `git diff` before treating new affordances as durable repo truth.
 - Speaker turns are currently pause-derived. `speakerLabel`, `manual`, and `diarized` are future seams, not a finished speaker workflow.
 - Export is transcript-focused (`txt`, `md`, `srt`, `vtt`). Whole-workspace backup/import is still missing.

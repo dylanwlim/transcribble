@@ -1,8 +1,14 @@
 "use client";
 
 import { Download, ShieldCheck, Upload } from "lucide-react";
+import React from "react";
 
+import {
+  ADD_RECORDING_LABEL,
+  EMPTY_STATE_COPY,
+} from "@/lib/transcribble/constants";
 import { cn } from "@/lib/utils";
+import { KeyboardShortcut } from "./keyboard-shortcut";
 
 interface EmptyStateProps {
   onImport: () => void;
@@ -37,8 +43,7 @@ export function EmptyState({
           Your local voice workspace
         </h1>
         <p className="mx-auto mt-3 max-w-[38rem] text-pretty text-[14px] leading-6 text-muted-foreground sm:text-[15px]">
-          Bring in audio or video. Transcribble transcribes it on this device and
-          keeps everything here - searchable, editable, and exportable.
+          {EMPTY_STATE_COPY}
         </p>
 
         <div className="workspace-empty-actions mt-7 w-full gap-3">
@@ -52,10 +57,12 @@ export function EmptyState({
             )}
           >
             <Upload className="h-3.5 w-3.5" />
-            Add a recording
-            <span className="workspace-empty-shortcut ml-1 rounded-full border border-background/30 px-2 py-0.5 text-[10px] text-background/85 mono">
-              ⌘O
-            </span>
+            {ADD_RECORDING_LABEL}
+            <KeyboardShortcut
+              shortcutId="add-recording"
+              className="workspace-empty-shortcut ml-1"
+              keyClassName="border-background/30 bg-background/10 text-background/85"
+            />
           </button>
 
           {!setupReady ? (
@@ -79,15 +86,13 @@ export function EmptyState({
           <div className="workspace-empty-meta-group">Drop files anywhere</div>
           <div className="workspace-empty-meta-group">
             <div className="workspace-empty-format-list" aria-label={`Supported formats: ${supportedFormats.join(", ")}`}>
-              {supportedFormats.map((format, index) => (
-                <div key={format} className="contents">
-                  {index > 0 ? (
-                    <span aria-hidden className="workspace-empty-format-separator text-subtle">
-                      ·
-                    </span>
-                  ) : null}
-                  <span className="workspace-empty-format-token">{format}</span>
-                </div>
+              {supportedFormats.map((format) => (
+                <span
+                  key={format}
+                  className="workspace-empty-format-token rounded-full border border-border bg-surface px-2.5 py-1"
+                >
+                  {format}
+                </span>
               ))}
             </div>
           </div>
