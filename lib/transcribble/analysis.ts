@@ -749,14 +749,18 @@ export function updateTranscriptSegmentText(
   nextText: string,
   marks: TranscriptMark[] = [],
 ) {
-  const segments = document.segments.map((segment) =>
-    segment.id === segmentId
-      ? {
-          ...segment,
-          ...buildSegmentTextState(nextText),
-        }
-      : segment,
-  );
+  const segments = document.segments.map((segment) => {
+    if (segment.id !== segmentId) return segment;
+    const textState = buildSegmentTextState(nextText);
+    const originalText = segment.originalText ?? segment.text;
+    const revertingToOriginal = textState.text === originalText;
+    return {
+      ...segment,
+      ...textState,
+      originalText: revertingToOriginal ? undefined : originalText,
+    };
+  });
 
-  return rebuildTranscriptDocument(projectId, segments, document.stats.duration, document.chunks, marks);
+  const next = rebuildTranscriptDocument(projectId, segments, document.stats.duration, document.chunks, marks);
+  return document.envelope ? { ...next, envelope: document.envelope } : next;
 }

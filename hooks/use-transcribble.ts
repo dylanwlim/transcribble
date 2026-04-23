@@ -18,6 +18,7 @@ import {
 } from "@/lib/transcribble/constants";
 import { getExportFilename, serializeProject, type ExportFormat } from "@/lib/transcribble/export";
 import {
+  computeRmsEnvelope,
   detectPreferredRuntime,
   getInputAcceptValue,
   getLocalInferenceCapabilityIssue,
@@ -103,6 +104,7 @@ interface ActiveJob {
   jobId: number;
   projectId: string;
   duration: number;
+  envelope?: number[];
 }
 
 interface WorkspaceNotice {
@@ -182,7 +184,18 @@ function writeStoredJson(key: string, value: unknown) {
 }
 
 function sortProjects(projects: TranscriptProject[]) {
-  return [...projects].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  return [...projects].sort((left, right) => {
+    const pinnedDelta = Number(right.pinned ?? false) - Number(left.pinned ?? false);
+    if (pinnedDelta !== 0) return pinnedDelta;
+    const leftOrder = left.sortOrder;
+    const rightOrder = right.sortOrder;
+    if (leftOrder !== undefined && rightOrder !== undefined) {
+      return leftOrder - rightOrder;
+    }
+    if (leftOrder !== undefined) return -1;
+    if (rightOrder !== undefined) return 1;
+    return right.updatedAt.localeCompare(left.updatedAt);
+  });
 }
 
 function isTextEntryTarget(target: EventTarget | null) {
@@ -663,6 +676,10 @@ export function useTranscribble() {
             currentProject?.marks ?? [],
           );
 
+          const documentWithEnvelope = activeJob.envelope
+            ? { ...document, envelope: activeJob.envelope }
+            : document;
+
           applyProjectUpdate(
             projectId,
             (project) =>
@@ -674,7 +691,7 @@ export function useTranscribble() {
                 error: undefined,
                 duration: activeJob.duration,
                 runtime: payload.device,
-                transcript: document,
+                transcript: documentWithEnvelope,
               }),
             { persist: true, select: !selectedProjectIdRef.current },
           );
@@ -785,10 +802,13 @@ export function useTranscribble() {
           return;
         }
 
+        const envelope = computeRmsEnvelope(prepared.audio, 1024);
+
         activeJobRef.current = {
           jobId,
           projectId: project.id,
           duration: prepared.duration,
+          envelope,
         };
 
         if (prepared.usedFFmpeg) {
@@ -1103,6 +1123,85 @@ export function useTranscribble() {
     [enqueueFiles],
   );
 
+  const recordingStateRef = useRef<{
+    recorder: MediaRecorder;
+    stream: MediaStream;
+    chunks: Blob[];
+    startedAt: number;
+  } | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+
+  const stopRecording = useCallback(async () => {
+    const state = recordingStateRef.current;
+    if (!state) return;
+    recordingStateRef.current = null;
+    const { recorder, stream, chunks, startedAt } = state;
+    await new Promise<void>((resolve) => {
+      if (recorder.state === "inactive") {
+        resolve();
+        return;
+      }
+      recorder.addEventListener("stop", () => resolve(), { once: true });
+      recorder.stop();
+    });
+    stream.getTracks().forEach((track) => track.stop());
+    setIsRecording(false);
+    if (chunks.length === 0) return;
+    const mimeType = recorder.mimeType || "audio/webm";
+    const extension = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
+    const stamp = new Date(startedAt).toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const file = new File(chunks, `Recording ${stamp}.${extension}`, { type: mimeType });
+    await enqueueFiles([file]);
+  }, [enqueueFiles]);
+
+  const startRecording = useCallback(async () => {
+    if (recordingStateRef.current) return;
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setNotice({ tone: "error", message: "This browser does not expose a microphone API." });
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const preferredTypes = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"];
+      const supportedType = preferredTypes.find((type) =>
+        typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(type),
+      );
+      const recorder = supportedType
+        ? new MediaRecorder(stream, { mimeType: supportedType })
+        : new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data && event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      });
+      recorder.start(1000);
+      recordingStateRef.current = {
+        recorder,
+        stream,
+        chunks,
+        startedAt: Date.now(),
+      };
+      setIsRecording(true);
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error && error.name === "NotAllowedError"
+            ? "Microphone access was blocked. Enable it in the browser settings and try again."
+            : "Could not start recording. Check microphone access and try again.",
+      });
+    }
+  }, []);
+
+  const toggleRecording = useCallback(async () => {
+    if (recordingStateRef.current) {
+      await stopRecording();
+    } else {
+      await startRecording();
+    }
+  }, [startRecording, stopRecording]);
+
   const onCopyTranscript = useCallback(async () => {
     if (!selectedProject?.transcript?.plainText) {
       return;
@@ -1260,8 +1359,7 @@ export function useTranscribble() {
 
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        librarySearchRef.current?.focus();
-        librarySearchRef.current?.select();
+        window.dispatchEvent(new CustomEvent("transcribble:command-palette"));
         return;
       }
 
@@ -1372,14 +1470,113 @@ export function useTranscribble() {
     [applyProjectUpdate, selectedProject],
   );
 
+  const renameProject = useCallback(
+    (projectId: string, nextTitle: string) => {
+      const trimmed = nextTitle.trim();
+      if (!trimmed) return;
+      applyProjectUpdate(
+        projectId,
+        (project) => ({ ...project, title: trimmed }),
+        { persist: true },
+      );
+    },
+    [applyProjectUpdate],
+  );
+
+  const togglePinProject = useCallback(
+    (projectId: string) => {
+      applyProjectUpdate(
+        projectId,
+        (project) => ({ ...project, pinned: !project.pinned }),
+        { persist: true },
+      );
+    },
+    [applyProjectUpdate],
+  );
+
+  const reorderProjects = useCallback(
+    (sourceId: string, targetId: string, position: "before" | "after") => {
+      if (sourceId === targetId) return;
+      setProjects((previous) => {
+        const source = previous.find((project) => project.id === sourceId);
+        const target = previous.find((project) => project.id === targetId);
+        if (!source || !target) return previous;
+        const withoutSource = previous.filter((project) => project.id !== sourceId);
+        const targetIndex = withoutSource.findIndex((project) => project.id === targetId);
+        if (targetIndex === -1) return previous;
+        const insertIndex = position === "before" ? targetIndex : targetIndex + 1;
+        const reordered = [
+          ...withoutSource.slice(0, insertIndex),
+          { ...source, pinned: target.pinned },
+          ...withoutSource.slice(insertIndex),
+        ];
+        const next = reordered.map((project, index) => ({ ...project, sortOrder: index }));
+        void putProjects(next);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const revertSegmentText = useCallback(
+    (segmentId: string) => {
+      if (!selectedProject || !selectedProject.transcript) return;
+      const segment = selectedProject.transcript.segments.find((s) => s.id === segmentId);
+      if (!segment || !segment.originalText) return;
+      const nextMarks = selectedProject.marks.map((mark) =>
+        mark.segmentId === segment.id
+          ? {
+              ...mark,
+              label: makeMarkLabel(
+                { ...segment, text: segment.originalText ?? segment.text },
+                mark.kind,
+              ),
+            }
+          : mark,
+      );
+      const nextDocument = updateTranscriptSegmentText(
+        selectedProject.id,
+        selectedProject.transcript,
+        segment.id,
+        segment.originalText,
+        nextMarks,
+      );
+      applyProjectUpdate(
+        selectedProject.id,
+        (project) => ({
+          ...project,
+          marks: nextMarks,
+          transcript: nextDocument,
+          detail: "Restored the original transcription.",
+        }),
+        { persist: true },
+      );
+    },
+    [applyProjectUpdate, selectedProject],
+  );
+
   const upsertMark = useCallback(
-    (kind: TranscriptMark["kind"], color?: HighlightColor) => {
-      if (!selectedProject || !focusedSegment) {
+    (
+      kind: TranscriptMark["kind"],
+      color?: HighlightColor,
+      segmentIdOverride?: string,
+    ) => {
+      if (!selectedProject) {
+        return;
+      }
+
+      const targetSegment = segmentIdOverride
+        ? (selectedProject.transcript?.segments.find(
+            (segment) => segment.id === segmentIdOverride,
+          ) ?? null)
+        : focusedSegment;
+
+      if (!targetSegment) {
         return;
       }
 
       const existingMark = selectedProject.marks.find(
-        (mark) => mark.segmentId === focusedSegment.id && mark.kind === kind,
+        (mark) => mark.segmentId === targetSegment.id && mark.kind === kind,
       );
 
       const nextMarks = existingMark
@@ -1389,7 +1586,7 @@ export function useTranscribble() {
                 ? {
                     ...mark,
                     color,
-                    label: makeMarkLabel(focusedSegment, kind),
+                    label: makeMarkLabel(targetSegment, kind),
                   }
                 : mark,
             )
@@ -1399,9 +1596,9 @@ export function useTranscribble() {
             {
               id: crypto.randomUUID(),
               kind,
-              segmentId: focusedSegment.id,
+              segmentId: targetSegment.id,
               createdAt: new Date().toISOString(),
-              label: makeMarkLabel(focusedSegment, kind),
+              label: makeMarkLabel(targetSegment, kind),
               color,
             },
           ];
@@ -1836,9 +2033,16 @@ export function useTranscribble() {
     selectAdjacentSegment,
     jumpToTranscriptMatch,
     renameSelectedProject,
+    renameProject,
+    togglePinProject,
+    reorderProjects,
+    revertSegmentText,
+    toggleRecording,
+    isRecording,
     updateSelectedSegmentText,
     toggleBookmark: () => upsertMark("bookmark"),
     toggleHighlight: (color: HighlightColor) => upsertMark("highlight", color),
+    bookmarkSegment: (segmentId: string) => upsertMark("bookmark", undefined, segmentId),
     saveRange,
     removeSavedRange,
     primeTranscriptionModel,

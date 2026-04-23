@@ -52,6 +52,7 @@ export interface TranscriptSegment {
   searchText: string;
   tokens: string[];
   reviewReasons: string[];
+  originalText?: string;
 }
 
 export interface TranscriptReference {
@@ -211,6 +212,7 @@ export interface TranscriptDocument {
   stats: TranscriptStats;
   searchEntries: ProjectSearchEntry[];
   generatedAt: string;
+  envelope?: number[];
 }
 
 export interface TranscriptProject {
@@ -234,6 +236,8 @@ export interface TranscriptProject {
   transcript?: TranscriptDocument;
   marks: TranscriptMark[];
   savedRanges: SavedRange[];
+  pinned?: boolean;
+  sortOrder?: number;
 }
 
 export type LibrarySearchMatchKind = "title" | "segment" | "saved-range";

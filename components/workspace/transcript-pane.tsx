@@ -5,6 +5,7 @@ import {
   ArrowUp,
   Bookmark,
   Highlighter,
+  RotateCcw,
   Search,
   Sparkles,
   X,
@@ -39,12 +40,15 @@ interface TranscriptPaneProps {
   onTranscriptQueryChange: (value: string) => void;
   onSelectSegment: (id: string, autoplay?: boolean) => void;
   onUpdateSegmentText: (text: string) => void;
+  onRevertSegment?: (segmentId: string) => void;
   onToggleBookmark: () => void;
   onJumpMatch: (direction: -1 | 1) => void;
   transcriptSearchRef: React.Ref<HTMLInputElement>;
   partialTranscript?: string;
   canSearch: boolean;
   canEdit: boolean;
+  onBookmarkSegment?: (segmentId: string) => void;
+  onSaveRange?: (args: { start: number; end: number; label?: string }) => void;
 }
 
 function escapeRegExp(value: string) {
@@ -102,6 +106,7 @@ function SegmentRow({
   transcriptQuery,
   onSelect,
   onUpdate,
+  onRevert,
   canEdit,
 }: {
   segment: TranscriptSegment;
@@ -112,6 +117,7 @@ function SegmentRow({
   transcriptQuery: string;
   onSelect: (autoplay?: boolean) => void;
   onUpdate: (text: string) => void;
+  onRevert?: () => void;
   canEdit: boolean;
 }) {
   const [editing, setEditing] = useState(false);
@@ -143,6 +149,7 @@ function SegmentRow({
   const hasBookmark = marks.some((m) => m.kind === "bookmark");
   const hasHighlight = marks.find((m) => m.kind === "highlight");
   const hasReview = segment.reviewReasons.length > 0;
+  const isEdited = Boolean(segment.originalText) && segment.originalText !== segment.text;
 
   return (
     <div className="group flex items-start gap-3 py-1">
@@ -220,15 +227,29 @@ function SegmentRow({
           </button>
         )}
 
-        {(hasBookmark || hasReview) && !editing ? (
-          <div className="mt-1 flex items-center gap-1.5 opacity-60">
+        {(hasBookmark || hasReview || isEdited) && !editing ? (
+          <div className="mt-1 flex items-center gap-2">
             {hasBookmark ? (
-              <Bookmark className="h-3 w-3 fill-current text-primary" />
+              <Bookmark className="h-3 w-3 fill-current text-primary opacity-60" />
             ) : null}
             {hasReview ? (
-              <span className="text-[10px] uppercase tracking-wider text-warning">
+              <span className="text-[10px] uppercase tracking-wider text-warning opacity-60">
                 Review
               </span>
+            ) : null}
+            {isEdited ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRevert?.();
+                }}
+                title={`Original: ${segment.originalText}`}
+                className="inline-flex items-center gap-1 rounded-full border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-subtle hover:bg-muted hover:text-foreground ring-focus"
+              >
+                <RotateCcw className="h-2.5 w-2.5" />
+                Edited · Undo
+              </button>
             ) : null}
           </div>
         ) : null}
@@ -249,14 +270,24 @@ export function TranscriptPane({
   onTranscriptQueryChange,
   onSelectSegment,
   onUpdateSegmentText,
+  onRevertSegment,
   onJumpMatch,
   transcriptSearchRef,
   partialTranscript,
   canSearch,
   canEdit,
+  onBookmarkSegment,
+  onSaveRange,
 }: TranscriptPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const previousPlaybackRef = useRef<string | null>(null);
+  const [selectionState, setSelectionState] = useState<{
+    x: number;
+    y: number;
+    text: string;
+    startSegmentId: string;
+    endSegmentId: string;
+  } | null>(null);
 
   const grouped = useMemo(() => {
     const map = new Map<number, TranscriptSegment[]>();
@@ -297,6 +328,77 @@ export function TranscriptPane({
       target.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }, [playbackSegmentId]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const findSegmentId = (node: Node | null): string | null => {
+      let current: Node | null = node;
+      while (current) {
+        if (current instanceof HTMLElement) {
+          const id = current.getAttribute("data-segment-id");
+          if (id) return id;
+        }
+        current = current.parentNode;
+      }
+      return null;
+    };
+
+    const handleSelection = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+        setSelectionState(null);
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) {
+        setSelectionState(null);
+        return;
+      }
+      const startId = findSegmentId(range.startContainer);
+      const endId = findSegmentId(range.endContainer);
+      if (!startId || !endId) {
+        setSelectionState(null);
+        return;
+      }
+      const text = selection.toString().trim();
+      if (!text) {
+        setSelectionState(null);
+        return;
+      }
+      const rect = range.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) {
+        setSelectionState(null);
+        return;
+      }
+      setSelectionState({
+        x: rect.left + rect.width / 2,
+        y: Math.max(8, rect.top - 12),
+        text,
+        startSegmentId: startId,
+        endSegmentId: endId,
+      });
+    };
+
+    document.addEventListener("selectionchange", handleSelection);
+    return () => document.removeEventListener("selectionchange", handleSelection);
+  }, []);
+
+  const selectionActions = useMemo(() => {
+    if (!selectionState) return null;
+    const startSegment = segments.find((s) => s.id === selectionState.startSegmentId);
+    const endSegment = segments.find((s) => s.id === selectionState.endSegmentId);
+    if (!startSegment || !endSegment) return null;
+    const start = Math.min(startSegment.start, endSegment.start);
+    const end = Math.max(startSegment.end, endSegment.end);
+    return { start, end, text: selectionState.text, startSegmentId: startSegment.id };
+  }, [selectionState, segments]);
+
+  const dismissSelection = useCallback(() => {
+    window.getSelection()?.removeAllRanges();
+    setSelectionState(null);
+  }, []);
 
   const hasSegments = segments.length > 0;
   const partial = partialTranscript?.trim();
@@ -381,6 +483,39 @@ export function TranscriptPane({
         </div>
       ) : null}
 
+      {selectionState && selectionActions ? (
+        <SelectionToolbar
+          visible
+          x={selectionState.x}
+          y={selectionState.y}
+          onCopy={() => {
+            void navigator.clipboard?.writeText(selectionActions.text).catch(() => undefined);
+            dismissSelection();
+          }}
+          onBookmark={
+            onBookmarkSegment
+              ? () => {
+                  onBookmarkSegment(selectionActions.startSegmentId);
+                  dismissSelection();
+                }
+              : undefined
+          }
+          onSaveRange={
+            onSaveRange
+              ? () => {
+                  onSaveRange({
+                    start: selectionActions.start,
+                    end: selectionActions.end,
+                    label: selectionActions.text.slice(0, 64),
+                  });
+                  dismissSelection();
+                }
+              : undefined
+          }
+          onClose={dismissSelection}
+        />
+      ) : null}
+
       <div
         ref={containerRef}
         className="scroll-y flex-1 pb-24"
@@ -403,6 +538,7 @@ export function TranscriptPane({
                         transcriptQuery={transcriptQuery}
                         onSelect={(autoplay) => onSelectSegment(segment.id, autoplay)}
                         onUpdate={onUpdateSegmentText}
+                        onRevert={onRevertSegment ? () => onRevertSegment(segment.id) : undefined}
                         canEdit={canEdit}
                       />
                     </div>
@@ -482,13 +618,15 @@ export function SelectionToolbar({
   y,
   onCopy,
   onBookmark,
+  onSaveRange,
   onClose,
 }: {
   visible: boolean;
   x: number;
   y: number;
   onCopy: () => void;
-  onBookmark: () => void;
+  onBookmark?: () => void;
+  onSaveRange?: () => void;
   onClose: () => void;
 }) {
   if (!visible) return null;
@@ -496,8 +634,9 @@ export function SelectionToolbar({
     <div
       role="toolbar"
       aria-label="Selection actions"
-      className="fixed z-40 flex items-center gap-0.5 rounded-full border border-border bg-popover px-1 py-1 text-[12px] shadow-[var(--shadow-float)] animate-rise-in"
+      className="fixed z-40 -translate-x-1/2 -translate-y-full flex items-center gap-0.5 rounded-full border border-border bg-popover px-1 py-1 text-[12px] shadow-[var(--shadow-float)] animate-rise-in"
       style={{ left: x, top: y }}
+      onMouseDown={(event) => event.preventDefault()}
     >
       <button
         type="button"
@@ -506,18 +645,29 @@ export function SelectionToolbar({
       >
         Copy
       </button>
-      <button
-        type="button"
-        onClick={onBookmark}
-        className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-foreground hover:bg-muted ring-focus"
-      >
-        <Bookmark className="h-3 w-3" />
-        Bookmark
-      </button>
+      {onBookmark ? (
+        <button
+          type="button"
+          onClick={onBookmark}
+          className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-foreground hover:bg-muted ring-focus"
+        >
+          <Bookmark className="h-3 w-3" />
+          Bookmark
+        </button>
+      ) : null}
+      {onSaveRange ? (
+        <button
+          type="button"
+          onClick={onSaveRange}
+          className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-foreground hover:bg-muted ring-focus"
+        >
+          Save range
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={onClose}
-        className="rounded-full p-1 text-subtle hover:bg-muted ring-focus"
+        className="rounded-full p-1 text-subtle ring-focus hover:bg-muted hover:text-foreground"
         aria-label="Close"
       >
         <X className="h-3 w-3" />

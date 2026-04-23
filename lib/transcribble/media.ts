@@ -30,6 +30,30 @@ export interface PreparationCallbacks {
   onProgress?: (progress: number | null) => void;
 }
 
+export function computeRmsEnvelope(audio: Float32Array, bins = 1024): number[] {
+  if (audio.length === 0 || bins <= 0) return [];
+  const out = new Array<number>(bins);
+  const samplesPerBin = audio.length / bins;
+  let peak = 0;
+  for (let i = 0; i < bins; i += 1) {
+    const start = Math.floor(i * samplesPerBin);
+    const end = Math.min(audio.length, Math.floor((i + 1) * samplesPerBin));
+    let sumSquares = 0;
+    const count = Math.max(1, end - start);
+    for (let j = start; j < end; j += 1) {
+      const s = audio[j];
+      sumSquares += s * s;
+    }
+    const rms = Math.sqrt(sumSquares / count);
+    out[i] = rms;
+    if (rms > peak) peak = rms;
+  }
+  if (peak > 0) {
+    for (let i = 0; i < bins; i += 1) out[i] = out[i] / peak;
+  }
+  return out;
+}
+
 type AudioContextConstructor = typeof AudioContext;
 type WindowWithWebKitAudioContext = Window &
   typeof globalThis & {

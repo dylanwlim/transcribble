@@ -29,7 +29,7 @@ export const metadata: Metadata = {
     statusBarStyle: "default",
     title: "Transcribble",
   },
-  metadataBase: new URL("https://transcribble.vercel.app"),
+  metadataBase: new URL("https://transcribble-rho.vercel.app"),
 };
 
 const themeScript = `

@@ -18,6 +18,7 @@ interface WaveformProps {
   segments: TranscriptSegment[];
   marks: TranscriptMark[];
   ranges: SavedRange[];
+  envelope?: number[];
   recording?: boolean;
   onSeek: (time: number, autoplay?: boolean) => void;
   onBookmarkClick?: (segmentId: string) => void;
@@ -86,6 +87,23 @@ function buildEnvelope(
   return Array.from(envelope);
 }
 
+function resampleEnvelope(source: number[], bars: number): number[] {
+  if (bars <= 0 || source.length === 0) return [];
+  const out = new Array<number>(bars);
+  const ratio = source.length / bars;
+  for (let i = 0; i < bars; i += 1) {
+    const start = Math.floor(i * ratio);
+    const end = Math.max(start + 1, Math.floor((i + 1) * ratio));
+    let max = 0;
+    for (let j = start; j < end && j < source.length; j += 1) {
+      const v = source[j];
+      if (v > max) max = v;
+    }
+    out[i] = Math.max(0.06, Math.min(1, max));
+  }
+  return out;
+}
+
 export function Waveform({
   mediaUrl,
   duration,
@@ -94,6 +112,7 @@ export function Waveform({
   segments,
   marks,
   ranges,
+  envelope: sourceEnvelope,
   recording,
   onSeek,
   onBookmarkClick,
@@ -122,8 +141,11 @@ export function Waveform({
   const totalBars = Math.max(16, Math.floor(width / (BAR_WIDTH + BAR_GAP)));
 
   const envelope = useMemo(
-    () => buildEnvelope(segments, duration, totalBars),
-    [segments, duration, totalBars],
+    () =>
+      sourceEnvelope && sourceEnvelope.length > 0
+        ? resampleEnvelope(sourceEnvelope, totalBars)
+        : buildEnvelope(segments, duration, totalBars),
+    [sourceEnvelope, segments, duration, totalBars],
   );
 
   useEffect(() => {

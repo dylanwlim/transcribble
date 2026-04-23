@@ -69,6 +69,9 @@ interface StageProps {
   canSearch: boolean;
   canEdit: boolean;
   canExport: boolean;
+  onBookmarkSegment?: (segmentId: string) => void;
+  onSaveRange?: (args: { start: number; end: number; label?: string }) => void;
+  onRevertSegment?: (segmentId: string) => void;
 }
 
 export function Stage(props: StageProps) {
@@ -112,6 +115,9 @@ export function Stage(props: StageProps) {
     canSearch,
     canEdit,
     canExport,
+    onBookmarkSegment,
+    onSaveRange,
+    onRevertSegment,
   } = props;
 
   const [playbackRate, setPlaybackRate] = useState(1);
@@ -284,6 +290,7 @@ export function Stage(props: StageProps) {
           segments={segments}
           marks={marks}
           ranges={ranges}
+          envelope={project.transcript?.envelope}
           onSeek={(time) => {
             const media = mediaRef.current;
             if (media) {
@@ -329,6 +336,9 @@ export function Stage(props: StageProps) {
           partialTranscript={partialTranscript}
           canSearch={canSearch}
           canEdit={canEdit}
+          onBookmarkSegment={onBookmarkSegment}
+          onSaveRange={onSaveRange}
+          onRevertSegment={onRevertSegment}
         />
       </div>
     </div>

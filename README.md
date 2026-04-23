@@ -2,6 +2,8 @@
 
 Transcribble is a private voice workspace for turning recordings into searchable, editable knowledge on this device.
 
+Current public app: [transcribble-rho.vercel.app](https://transcribble-rho.vercel.app)
+
 It is not a chatbot shell and it is not a hosted transcription dashboard. The core flow is local-first:
 
 - add audio or video
@@ -109,7 +111,8 @@ npm run validate
 
 ## Known Limits
 
-- Speaker diarization is still not implemented
+- Speaker turns are still pause-derived. Real diarization and a full manual speaker workflow are not implemented.
 - First-run offline use still depends on one online setup
 - Browser memory limits still apply to very large recordings
 - Some browsers do not expose durable storage or private file system support
+- Whole-workspace backup and re-import are not implemented yet

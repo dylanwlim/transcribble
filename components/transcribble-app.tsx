@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, X } from "lucide-react";
+import { AlertTriangle, Menu, Settings2, Upload, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useTranscribble } from "@/hooks/use-transcribble";
 import { getProjectViewState } from "@/lib/transcribble/status";
 import type { HighlightColor } from "@/lib/transcribble/types";
 
+import { CommandPalette } from "@/components/workspace/command-palette";
 import { DropOverlay, EmptyState } from "@/components/workspace/empty-state";
 import { ExportSheet } from "@/components/workspace/export-sheet";
 import { Inspector } from "@/components/workspace/inspector";
@@ -63,8 +64,16 @@ export function TranscribbleApp() {
     seekByDelta,
     seekToTime,
     updateSelectedSegmentText,
+    revertSegmentText,
+    renameProject,
+    togglePinProject,
+    reorderProjects,
+    toggleRecording,
+    isRecording,
     toggleBookmark,
     toggleHighlight,
+    bookmarkSegment,
+    saveRange,
     removeSavedRange,
     primeTranscriptionModel,
     primeMediaRuntime,
@@ -83,6 +92,14 @@ export function TranscribbleApp() {
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  useEffect(() => {
+    const handler = () => setPaletteOpen(true);
+    window.addEventListener("transcribble:command-palette", handler);
+    return () => window.removeEventListener("transcribble:command-palette", handler);
+  }, []);
 
   const matchedSegmentIds = useMemo(
     () =>
@@ -116,6 +133,11 @@ export function TranscribbleApp() {
     setExportOpen(true);
   }, [selectedProjectView?.canExport]);
 
+  const openSettings = useCallback(() => {
+    setMobileSidebarOpen(false);
+    setSettingsOpen(true);
+  }, []);
+
   // Global shortcuts (additive — the hook already handles Space / ⌘K / / / J / K / B)
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -145,7 +167,7 @@ export function TranscribbleApp() {
 
       if (cmd && event.key === ",") {
         event.preventDefault();
-        setSettingsOpen(true);
+        openSettings();
         return;
       }
 
@@ -168,7 +190,9 @@ export function TranscribbleApp() {
       }
 
       if (event.key === "Escape" && !inText) {
-        if (settingsOpen) {
+        if (mobileSidebarOpen) {
+          setMobileSidebarOpen(false);
+        } else if (settingsOpen) {
           setSettingsOpen(false);
         } else if (exportOpen) {
           setExportOpen(false);
@@ -184,6 +208,8 @@ export function TranscribbleApp() {
     openFilePicker,
     openExport,
     exportOpen,
+    mobileSidebarOpen,
+    openSettings,
     projects,
     selectProject,
     selectedProject,
@@ -194,10 +220,74 @@ export function TranscribbleApp() {
 
   const emptyState = !selectedProject && projects.length === 0;
   const effectiveNotice = notice ?? (capabilityIssue ? { tone: "error" as const, message: capabilityIssue } : null);
+  const supportedFormats = accept
+    .split(",")
+    .map((value) => value.replace(".", "").trim().toUpperCase())
+    .filter(Boolean);
+
+  const renderSidebar = ({
+    closeOnAction = false,
+    className,
+    headerAction,
+    showSearchShortcut,
+  }: {
+    closeOnAction?: boolean;
+    className?: string;
+    headerAction?: React.ReactNode;
+    showSearchShortcut?: boolean;
+  }) => {
+    const finishAction = () => {
+      if (closeOnAction) {
+        setMobileSidebarOpen(false);
+      }
+    };
+
+    return (
+      <Sidebar
+        projects={projects}
+        selectedProjectId={selectedProject?.id ?? null}
+        onSelect={(id) => {
+          selectProject(id);
+          finishAction();
+        }}
+        onImport={() => {
+          openFilePicker();
+          finishAction();
+        }}
+        libraryQuery={libraryQuery}
+        onLibraryQueryChange={setLibraryQuery}
+        searchResults={librarySearchResults}
+        onOpenSearchResult={(result) => {
+          openLibrarySearchResult(result);
+          finishAction();
+        }}
+        onRetry={retryProject}
+        onRemove={(id) => void removeProject(id)}
+        onRename={renameProject}
+        onTogglePin={togglePinProject}
+        onReorder={reorderProjects}
+        onToggleRecording={() => {
+          void toggleRecording();
+          finishAction();
+        }}
+        isRecording={isRecording}
+        librarySearchRef={librarySearchRef}
+        storageUsedBytes={storageState?.usage ?? null}
+        storageQuotaBytes={storageState?.quota ?? null}
+        storagePersisted={storageState?.persisted ?? null}
+        modelReady={assetSetup.modelReady}
+        mediaReady={assetSetup.mediaReady}
+        online={effectiveOnline}
+        className={className}
+        headerAction={headerAction}
+        showSearchShortcut={showSearchShortcut}
+      />
+    );
+  };
 
   return (
     <div
-      className="flex h-screen min-h-screen w-full overflow-hidden bg-background text-foreground"
+      className="grid h-dvh min-h-dvh w-full grid-cols-1 gap-[var(--workspace-shell-gap)] overflow-hidden bg-background text-foreground lg:grid-cols-[var(--workspace-sidebar-width)_minmax(0,1fr)]"
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
@@ -212,111 +302,120 @@ export function TranscribbleApp() {
         aria-hidden
       />
 
-      <Sidebar
-        projects={projects}
-        selectedProjectId={selectedProject?.id ?? null}
-        onSelect={selectProject}
-        onImport={openFilePicker}
-        libraryQuery={libraryQuery}
-        onLibraryQueryChange={setLibraryQuery}
-        searchResults={librarySearchResults}
-        onOpenSearchResult={openLibrarySearchResult}
-        onRetry={retryProject}
-        onRemove={(id) => void removeProject(id)}
-        librarySearchRef={librarySearchRef}
-        storageUsedBytes={storageState?.usage ?? null}
-        storageQuotaBytes={storageState?.quota ?? null}
-        storagePersisted={storageState?.persisted ?? null}
-        modelReady={assetSetup.modelReady}
-        mediaReady={assetSetup.mediaReady}
-        online={effectiveOnline}
-      />
+      <div className="hidden min-h-0 lg:block">
+        {renderSidebar({ className: "h-full", showSearchShortcut: true })}
+      </div>
 
-      <main className="relative flex min-w-0 flex-1">
-        {emptyState ? (
-          <EmptyState
-            onImport={openFilePicker}
-            onPrimeSetup={primeWorkspaceSetup}
-            setupReady={setupReady}
-            warming={warmingSetup}
-            online={effectiveOnline}
-            supportedFormatsLabel={accept
-              .split(",")
-              .map((value) => value.replace(".", "").toUpperCase())
-              .join(" · ")}
-          />
-        ) : selectedProject ? (
-          <>
-            <Stage
-              project={selectedProject}
-              mediaUrl={mediaUrl}
-              mediaRef={mediaRef}
-              mediaHandlers={mediaHandlers}
-              currentTime={currentTime}
-              isPlaying={isPlaying}
-              segments={transcriptSegments}
-              turns={transcriptTurns}
-              marks={currentProjectMarks}
-              ranges={currentProjectRanges}
-              focusedSegmentId={focusedSegmentId}
-              playbackSegmentId={playbackSegmentId}
-              matchedSegmentIds={matchedSegmentIds}
-              transcriptQuery={transcriptQuery}
-              onTranscriptQueryChange={setTranscriptQuery}
-              partialTranscript={partialTranscript}
-              onRename={renameSelectedProject}
-              onSelectSegment={selectSegment}
-              onUpdateSegmentText={updateSelectedSegmentText}
-              onJumpMatch={jumpToTranscriptMatch}
-              onSkip={seekByDelta}
-              onPrevSegment={() => selectAdjacentSegment(-1, true)}
-              onNextSegment={() => selectAdjacentSegment(1, true)}
-              onToggleBookmark={toggleBookmark}
-              onToggleInspector={() => setInspectorOpen((o) => !o)}
-              inspectorOpen={inspectorOpen}
-              onCopy={onCopyTranscript}
-              copied={copied}
-              onExport={openExport}
-              onRetry={() => retryProject(selectedProject.id)}
-              onRemove={() => void removeProject(selectedProject.id)}
-              setupReady={setupReady}
-              warmingSetup={warmingSetup}
-              online={effectiveOnline}
+      <div className="relative flex min-h-0 min-w-0 flex-col">
+        <MobileHeader
+          onOpenSidebar={() => setMobileSidebarOpen(true)}
+          onImport={openFilePicker}
+          onOpenSettings={openSettings}
+        />
+
+        <main className="relative flex min-h-0 min-w-0 flex-1">
+          {emptyState ? (
+            <EmptyState
+              onImport={openFilePicker}
               onPrimeSetup={primeWorkspaceSetup}
-              transcriptSearchRef={transcriptSearchRef}
-              canSearch={selectedProjectView?.canSearchTranscript ?? false}
-              canEdit={selectedProject.status === "ready"}
-              canExport={selectedProjectView?.canExport ?? false}
+              setupReady={setupReady}
+              warming={warmingSetup}
+              online={effectiveOnline}
+              supportedFormats={supportedFormats}
             />
-
-            {inspectorOpen && selectedProjectView?.canUseTranscript ? (
-              <Inspector
+          ) : selectedProject ? (
+            <>
+              <Stage
                 project={selectedProject}
+                mediaUrl={mediaUrl}
+                mediaRef={mediaRef}
+                mediaHandlers={mediaHandlers}
+                currentTime={currentTime}
+                isPlaying={isPlaying}
+                segments={transcriptSegments}
+                turns={transcriptTurns}
                 marks={currentProjectMarks}
                 ranges={currentProjectRanges}
-                onClose={() => setInspectorOpen(false)}
-                onJumpToSegment={selectSegment}
-                onJumpToTime={(time) => seekToTime(time, false)}
-                onRemoveRange={removeSavedRange}
-                onToggleHighlight={(color: HighlightColor) => toggleHighlight(color)}
+                focusedSegmentId={focusedSegmentId}
+                playbackSegmentId={playbackSegmentId}
+                matchedSegmentIds={matchedSegmentIds}
+                transcriptQuery={transcriptQuery}
+                onTranscriptQueryChange={setTranscriptQuery}
+                partialTranscript={partialTranscript}
+                onRename={renameSelectedProject}
+                onSelectSegment={selectSegment}
+                onUpdateSegmentText={updateSelectedSegmentText}
+                onJumpMatch={jumpToTranscriptMatch}
+                onSkip={seekByDelta}
+                onPrevSegment={() => selectAdjacentSegment(-1, true)}
+                onNextSegment={() => selectAdjacentSegment(1, true)}
+                onToggleBookmark={toggleBookmark}
+                onToggleInspector={() => setInspectorOpen((o) => !o)}
+                inspectorOpen={inspectorOpen}
+                onCopy={onCopyTranscript}
+                copied={copied}
                 onExport={openExport}
+                onRetry={() => retryProject(selectedProject.id)}
+                onRemove={() => void removeProject(selectedProject.id)}
+                setupReady={setupReady}
+                warmingSetup={warmingSetup}
+                online={effectiveOnline}
+                onPrimeSetup={primeWorkspaceSetup}
+                transcriptSearchRef={transcriptSearchRef}
+                canSearch={selectedProjectView?.canSearchTranscript ?? false}
+                canEdit={selectedProject.status === "ready"}
+                canExport={selectedProjectView?.canExport ?? false}
+                onBookmarkSegment={bookmarkSegment}
+                onSaveRange={saveRange}
+                onRevertSegment={revertSegmentText}
               />
-            ) : null}
-          </>
-        ) : (
-          <EmptyState
-            onImport={openFilePicker}
-            onPrimeSetup={primeWorkspaceSetup}
-            setupReady={setupReady}
-            warming={warmingSetup}
-            online={effectiveOnline}
-            supportedFormatsLabel={accept
-              .split(",")
-              .map((value) => value.replace(".", "").toUpperCase())
-              .join(" · ")}
-          />
-        )}
-      </main>
+
+              {inspectorOpen && selectedProjectView?.canUseTranscript ? (
+                <Inspector
+                  project={selectedProject}
+                  marks={currentProjectMarks}
+                  ranges={currentProjectRanges}
+                  onClose={() => setInspectorOpen(false)}
+                  onJumpToSegment={selectSegment}
+                  onJumpToTime={(time) => seekToTime(time, false)}
+                  onRemoveRange={removeSavedRange}
+                  onToggleHighlight={(color: HighlightColor) => toggleHighlight(color)}
+                  onExport={openExport}
+                />
+              ) : null}
+            </>
+          ) : (
+            <EmptyState
+              onImport={openFilePicker}
+              onPrimeSetup={primeWorkspaceSetup}
+              setupReady={setupReady}
+              warming={warmingSetup}
+              online={effectiveOnline}
+              supportedFormats={supportedFormats}
+            />
+          )}
+
+          <SettingsLaunch onOpen={openSettings} />
+        </main>
+      </div>
+
+      <MobileSidebarDrawer open={mobileSidebarOpen} onClose={() => setMobileSidebarOpen(false)}>
+        {renderSidebar({
+          closeOnAction: true,
+          className: "h-full shadow-[var(--shadow-float)]",
+          showSearchShortcut: false,
+          headerAction: (
+            <button
+              type="button"
+              onClick={() => setMobileSidebarOpen(false)}
+              aria-label="Close library"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-subtle transition-colors duration-150 hover:bg-muted hover:text-foreground ring-focus"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ),
+        })}
+      </MobileSidebarDrawer>
 
       {effectiveNotice ? (
         <div className="pointer-events-none fixed bottom-5 left-1/2 z-40 -translate-x-1/2 animate-rise-in">
@@ -375,9 +474,118 @@ export function TranscribbleApp() {
         onInstall={promptInstall}
       />
 
-      <DropOverlay visible={dragActive} />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        projects={projects}
+        onOpenProject={(id) => selectProject(id)}
+        onJumpToSegment={(projectId, segmentId) => {
+          selectProject(projectId);
+          const segment = projects
+            .find((p) => p.id === projectId)
+            ?.transcript?.segments.find((s) => s.id === segmentId);
+          if (segment) seekToTime(segment.start, false);
+        }}
+        onJumpToRange={(projectId, rangeId) => {
+          selectProject(projectId);
+          const range = projects
+            .find((p) => p.id === projectId)
+            ?.savedRanges.find((r) => r.id === rangeId);
+          if (range) seekToTime(range.start, false);
+        }}
+      />
 
-      <SettingsLaunch onOpen={() => setSettingsOpen(true)} />
+      <DropOverlay visible={dragActive} />
+    </div>
+  );
+}
+
+function MobileHeader({
+  onOpenSidebar,
+  onImport,
+  onOpenSettings,
+}: {
+  onOpenSidebar: () => void;
+  onImport: () => void;
+  onOpenSettings: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 border-b border-border bg-background/95 px-[var(--workspace-mobile-padding)] pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur lg:hidden">
+      <button
+        type="button"
+        onClick={onOpenSidebar}
+        aria-label="Open library and search"
+        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-subtle shadow-[var(--shadow-soft)] transition-colors duration-150 hover:bg-muted hover:text-foreground ring-focus"
+      >
+        <Menu className="h-4 w-4" />
+      </button>
+
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-foreground text-background">
+          <svg viewBox="0 0 16 16" className="h-4 w-4 fill-current" aria-hidden>
+            <rect x="2" y="6" width="1.6" height="4" rx="0.8" />
+            <rect x="5" y="3" width="1.6" height="10" rx="0.8" />
+            <rect x="8" y="5" width="1.6" height="6" rx="0.8" />
+            <rect x="11" y="2" width="1.6" height="12" rx="0.8" />
+          </svg>
+        </div>
+        <div className="min-w-0">
+          <div className="truncate text-[13px] font-semibold tracking-tight text-foreground">
+            Transcribble
+          </div>
+          <div className="truncate text-[11px] text-muted-foreground">
+            Local voice workspace
+          </div>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onImport}
+        aria-label="Add a recording"
+        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-subtle shadow-[var(--shadow-soft)] transition-colors duration-150 hover:bg-muted hover:text-foreground ring-focus"
+      >
+        <Upload className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={onOpenSettings}
+        aria-label="Open settings"
+        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-subtle shadow-[var(--shadow-soft)] transition-colors duration-150 hover:bg-muted hover:text-foreground ring-focus"
+      >
+        <Settings2 className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+function MobileSidebarDrawer({
+  open,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  if (!open) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Library"
+      className="fixed inset-0 z-50 flex lg:hidden"
+    >
+      <button
+        type="button"
+        aria-label="Close library"
+        onClick={onClose}
+        className="absolute inset-0 bg-foreground/20 backdrop-blur-[2px]"
+      />
+      <div className="relative h-full w-[var(--workspace-sidebar-drawer-width)] max-w-[calc(100vw-1rem)]">
+        {children}
+      </div>
     </div>
   );
 }
@@ -390,7 +598,7 @@ function SettingsLaunch({ onOpen }: { onOpen: () => void }) {
       aria-label="Open settings"
       title="Settings (⌘,)"
       className={cn(
-        "fixed bottom-4 left-4 z-30 flex h-7 w-7 items-center justify-center rounded-full",
+        "absolute bottom-[max(var(--workspace-floating-offset),env(safe-area-inset-bottom))] right-[max(var(--workspace-floating-offset),env(safe-area-inset-right))] z-30 hidden h-11 w-11 items-center justify-center rounded-full lg:flex",
         "border border-border bg-surface text-subtle shadow-[var(--shadow-soft)]",
         "transition-colors duration-150 hover:text-foreground hover:bg-muted ring-focus",
       )}

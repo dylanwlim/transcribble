@@ -10,7 +10,7 @@ interface EmptyStateProps {
   setupReady: boolean;
   warming: boolean;
   online: boolean;
-  supportedFormatsLabel: string;
+  supportedFormats: string[];
 }
 
 export function EmptyState({
@@ -19,12 +19,12 @@ export function EmptyState({
   setupReady,
   warming,
   online,
-  supportedFormatsLabel,
+  supportedFormats,
 }: EmptyStateProps) {
   return (
-    <div className="flex h-full items-center justify-center px-6 py-12">
-      <div className="max-w-md text-center">
-        <div className="mx-auto mb-6 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+    <div className="workspace-empty-shell grid min-h-0 w-full flex-1 place-items-center px-[var(--workspace-mobile-padding)] py-10 sm:py-12 lg:px-10">
+      <div className="workspace-empty-hero mx-auto flex w-full max-w-[var(--workspace-hero-max-width)] flex-col items-center text-center">
+        <div className="mx-auto mb-6 grid h-14 w-14 place-items-center rounded-full bg-muted">
           <svg viewBox="0 0 24 24" className="h-5 w-5 fill-foreground">
             <rect x="3" y="9" width="2" height="6" rx="1" />
             <rect x="7" y="5" width="2" height="14" rx="1" />
@@ -33,26 +33,27 @@ export function EmptyState({
             <rect x="19" y="7" width="2" height="10" rx="1" />
           </svg>
         </div>
-        <h1 className="text-[24px] font-semibold tracking-tight text-foreground">
+        <h1 className="text-balance text-[clamp(1.75rem,4vw,2.35rem)] font-semibold tracking-tight text-foreground">
           Your local voice workspace
         </h1>
-        <p className="mx-auto mt-2 max-w-sm text-[14px] leading-6 text-muted-foreground">
+        <p className="mx-auto mt-3 max-w-[38rem] text-pretty text-[14px] leading-6 text-muted-foreground sm:text-[15px]">
           Bring in audio or video. Transcribble transcribes it on this device and
-          keeps everything here — searchable, editable, and exportable.
+          keeps everything here - searchable, editable, and exportable.
         </p>
 
-        <div className="mt-6 flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
+        <div className="workspace-empty-actions mt-7 w-full gap-3">
           <button
             type="button"
             onClick={onImport}
             className={cn(
-              "inline-flex h-10 items-center gap-2 rounded-full bg-foreground px-5 text-[13px] font-medium text-background",
+              "inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-foreground px-5 py-2 text-[13px] font-medium text-background",
+              "whitespace-nowrap",
               "transition-transform duration-150 motion-safe:hover:-translate-y-px ring-focus",
             )}
           >
             <Upload className="h-3.5 w-3.5" />
             Add a recording
-            <span className="ml-1 rounded border border-background/30 px-1 text-[10px] mono">
+            <span className="workspace-empty-shortcut ml-1 rounded-full border border-background/30 px-2 py-0.5 text-[10px] text-background/85 mono">
               ⌘O
             </span>
           </button>
@@ -63,7 +64,8 @@ export function EmptyState({
               onClick={() => void onPrimeSetup()}
               disabled={warming || !online}
               className={cn(
-                "inline-flex h-10 items-center gap-2 rounded-full border border-border bg-surface px-4 text-[13px] font-medium text-foreground",
+                "inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-border bg-surface px-5 py-2 text-[13px] font-medium text-foreground",
+                "whitespace-nowrap",
                 "transition-colors duration-150 hover:bg-muted disabled:opacity-50 ring-focus",
               )}
             >
@@ -73,12 +75,26 @@ export function EmptyState({
           ) : null}
         </div>
 
-        <div className="mt-8 flex items-center justify-center gap-4 text-[11px] text-subtle">
-          <span>Drop files anywhere</span>
-          <span className="h-0.5 w-0.5 rounded-full bg-border-strong" />
-          <span>{supportedFormatsLabel}</span>
-          <span className="h-0.5 w-0.5 rounded-full bg-border-strong" />
-          <span>Stays on this device</span>
+        <div className="workspace-empty-meta mt-7 gap-x-5 gap-y-3 text-[11px] leading-5 text-muted-foreground sm:text-[12px]">
+          <div className="workspace-empty-meta-group">Drop files anywhere</div>
+          <div className="workspace-empty-meta-group">
+            <div className="workspace-empty-format-list" aria-label={`Supported formats: ${supportedFormats.join(", ")}`}>
+              {supportedFormats.map((format, index) => (
+                <div key={format} className="contents">
+                  {index > 0 ? (
+                    <span aria-hidden className="workspace-empty-format-separator text-subtle">
+                      ·
+                    </span>
+                  ) : null}
+                  <span className="workspace-empty-format-token">{format}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="workspace-empty-meta-group inline-flex items-center justify-center gap-2">
+            <ShieldCheck className="h-3.5 w-3.5 text-subtle" aria-hidden />
+            <span>Stays on this device</span>
+          </div>
         </div>
       </div>
     </div>
