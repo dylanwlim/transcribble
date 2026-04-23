@@ -416,13 +416,13 @@ export function humanizePreparationError(error: unknown) {
     }
 
     if (message.includes("memory") || message.includes("out of memory")) {
-      return "Could not process this file locally. Try again or use a shorter recording.";
+      return "Could not process this file safely in browser mode. Use the local accelerator for this recording.";
     }
 
     return error.message;
   }
 
-  return "Could not process this file locally. Try again or use a shorter recording.";
+  return "Could not process this file safely in browser mode. Use the local accelerator for this recording.";
 }
 
 function getLocalPreparationRisk(fileSize: number, mediaKind: "audio" | "video") {
@@ -452,7 +452,7 @@ function getLocalPreparationRisk(fileSize: number, mediaKind: "audio" | "video")
 
   return `This recording is saved on this device, but this browser may not have enough memory to process ${formatBytes(
     fileSize,
-  )} locally in one pass. Try again on a desktop browser or use a shorter recording.`;
+  )} safely in one pass. Use the local accelerator for long or memory-heavy recordings.`;
 }
 
 export function getSupportedFormatLabels() {

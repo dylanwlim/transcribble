@@ -268,7 +268,14 @@ function buildTurns(projectId: string, segments: TranscriptSegment[]) {
       segmentIds: currentSegments.map((segment) => segment.id),
       wordCount: countWords(plainText),
       characterCount: countCharacters(plainText),
-      attribution: "pause-derived",
+      speakerLabel:
+        new Set(currentSegments.map((segment) => segment.speakerLabel).filter(Boolean)).size === 1
+          ? currentSegments.find((segment) => segment.speakerLabel)?.speakerLabel
+          : undefined,
+      attribution:
+        new Set(currentSegments.map((segment) => segment.attribution).filter(Boolean)).size === 1
+          ? currentSegments.find((segment) => segment.attribution)?.attribution ?? "pause-derived"
+          : "pause-derived",
     });
   };
 

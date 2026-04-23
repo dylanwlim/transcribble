@@ -13,18 +13,22 @@ import { KeyboardShortcut } from "./keyboard-shortcut";
 interface EmptyStateProps {
   onImport: () => void;
   onPrimeSetup: () => void | Promise<void>;
+  onOpenSettings: () => void;
   setupReady: boolean;
   warming: boolean;
   online: boolean;
+  helperAvailable: boolean;
   supportedFormats: string[];
 }
 
 export function EmptyState({
   onImport,
   onPrimeSetup,
+  onOpenSettings,
   setupReady,
   warming,
   online,
+  helperAvailable,
   supportedFormats,
 }: EmptyStateProps) {
   return (
@@ -80,6 +84,17 @@ export function EmptyState({
               {warming ? "Getting ready…" : online ? "Get this browser ready" : "Go online once"}
             </button>
           ) : null}
+
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className={cn(
+              "inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-border bg-surface px-5 py-2 text-[13px] font-medium text-foreground",
+              "whitespace-nowrap transition-colors duration-150 hover:bg-muted ring-focus",
+            )}
+          >
+            {helperAvailable ? "Local accelerator ready" : "Local accelerator setup"}
+          </button>
         </div>
 
         <div className="workspace-empty-meta mt-7 gap-x-5 gap-y-3 text-[11px] leading-5 text-muted-foreground sm:text-[12px]">
@@ -99,6 +114,11 @@ export function EmptyState({
           <div className="workspace-empty-meta-group inline-flex items-center justify-center gap-2">
             <ShieldCheck className="h-3.5 w-3.5 text-subtle" aria-hidden />
             <span>Stays on this device</span>
+          </div>
+          <div className="workspace-empty-meta-group">
+            {helperAvailable
+              ? "Long recordings route to the local accelerator"
+              : "Long recordings need the local accelerator"}
           </div>
         </div>
       </div>

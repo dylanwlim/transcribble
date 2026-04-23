@@ -1,88 +1,84 @@
 # Transcribble
 
-Transcribble is a private voice workspace for turning recordings into searchable, editable knowledge on this device.
+Transcribble is a local-first voice workspace for turning recordings into searchable, editable knowledge on this device.
 
 Current public app: [transcribble-rho.vercel.app](https://transcribble-rho.vercel.app)
 
-It is not a chatbot shell and it is not a hosted transcription dashboard. The core flow is local-first:
+## Modes
 
-- add audio or video
-- transcribe it in the browser
-- review the transcript against time-linked evidence
-- save moments and review ranges
-- reopen, search, edit, and export later from the same browser
+- Browser mode: the lightweight path for smaller, safer recordings when the browser runtime is genuinely a good fit.
+- Local accelerator mode: the default path for long or large media. It runs through the Transcribble Helper on `localhost`, uses native `ffprobe` / `ffmpeg`, and keeps the work on the same machine.
 
-## What The Product Does
-
-- Saves recordings, transcripts, edits, highlights, and saved review ranges in local browser storage
-- Builds timestamped transcript segments, chapters, turns, and grounded local outputs
-- Keeps cross-session search local, including transcript hits and saved review ranges
-- Exports plain text, markdown, SRT, and VTT from the same saved session
+The app does **not** default to any paid cloud transcription backend.
 
 ## Privacy And Cost
 
-- No paid API is required for the core workflow
-- No mandatory cloud backend is required for the core workflow
-- Recordings and transcripts stay in browser storage on this device
-- Search, review cues, summaries, questions, dates, glossary terms, and saved review ranges are built locally
+- Default behavior is zero-dollar and local-first.
+- No OpenAI API key, Vercel Blob, Vercel Workflows, S3, R2, Supabase Storage, Cloudinary, AssemblyAI, or Deepgram is required for the default architecture.
+- Browser mode keeps recordings on this device.
+- Local accelerator mode also keeps recordings on this machine and does not upload them to a remote service.
 
-## First-Time Setup And Offline Caveat
+## Large Files
 
-Transcribble does local processing, but a brand-new browser profile still needs one online setup before fully local repeat use works.
+Transcribble now handles large imports honestly:
 
-On first setup the browser downloads:
+- the browser still accepts large files when local storage is available
+- backend routing is centralized in `lib/transcribble/transcription-backends.ts`
+- smaller/safe recordings stay on the browser-local path
+- long or memory-risk recordings route to the local accelerator
+- if the helper is not running, the app keeps the source file locally and says that the local accelerator is required instead of pretending the browser will continue
 
-- the local transcription model
-- the media runtime used for video imports and browser fallback decoding
+The guaranteed path for a 1.1 GB meeting video is the local accelerator, not `decodeAudioData()`, `AudioBuffer`, or `ffmpeg.wasm`.
 
-After those are cached, normal use can stay local in that browser profile.
+## Transcribble Helper
 
-Important note:
+The helper lives in [helper/transcribble_helper.py](/Users/dylan/Projects/Dev/transcribble/helper/transcribble_helper.py).
 
-- This app does not claim true first-run offline support from a cold browser profile
-- If the browser has never downloaded the local assets before, internet is still required once
+It exposes:
+
+- `GET /health`
+- `GET /capabilities`
+- `POST /jobs`
+- `PUT /jobs/:id/source`
+- `GET /jobs/:id`
+- `POST /jobs/:id/cancel`
+- `POST /jobs/:id/retry`
+
+It:
+
+- probes media with native `ffprobe`
+- fails clearly when no usable audio stream exists
+- extracts mono 16 kHz speech audio with native `ffmpeg`
+- chunks long recordings with overlap
+- persists job state locally so refreshes and helper restarts can resume
+- prefers MLX Whisper on Apple Silicon when available, otherwise uses `faster-whisper`
+
+### Install The Helper
+
+1. Install native `ffmpeg` and `ffprobe`.
+2. Run `npm run helper:install`.
+3. Run `npm run helper:start`.
+
+Helper state is stored under `~/.transcribble-helper` by default.
+
+## First-Time Browser Setup
+
+Browser mode still needs one online setup in a fresh browser profile because the local model and browser media runtime are downloaded once and then cached.
+
+That first-run requirement applies only to the browser path. Large recordings should use the helper instead of relying on the browser runtime.
 
 ## Storage
 
-Transcribble now uses:
+Transcribble uses:
 
 - IndexedDB for project metadata, search data, and fallback media storage
 - OPFS for larger local media files when the browser supports the private file system
 
-Existing saved projects are preserved. The storage change is additive and falls back safely when OPFS is unavailable.
-
 The app also surfaces:
 
-- whether the browser granted persistent local storage
-- storage usage and available local space when the browser exposes it
+- whether persistent local storage was granted
+- local storage usage and available space when the browser exposes it
 - quota-aware import checks instead of a fixed file-size cap
-- whether larger recordings can use the private file system
-- browser notes that affect local reliability
-
-## Installability
-
-This repo now includes a basic installable web-app foundation:
-
-- web manifest
-- generated app icons
-- a lightweight service worker for quicker reopen support
-- install prompt wiring when the browser exposes it
-
-This improves reopenability and app-like launch behavior, but it does not change the first-run offline note above.
-
-## Core Review Workflow
-
-Transcribble supports two kinds of review markers:
-
-- quick marks: bookmarks and highlights on individual transcript lines
-- saved review ranges: named time ranges tied back to transcript segments
-
-Saved review ranges:
-
-- appear on the session map
-- show up in the session outline
-- are searchable in the library
-- are included in markdown export
 
 ## Development
 
@@ -93,27 +89,30 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-## Verification
+## Validation
 
 ```bash
-npm run validate
+npm run typecheck
+npm test
+npm run lint
+npm run build
 ```
 
 ## Main Files
 
 - [app/page.tsx](/Users/dylan/Projects/Dev/transcribble/app/page.tsx): app entry
 - [components/transcribble-app.tsx](/Users/dylan/Projects/Dev/transcribble/components/transcribble-app.tsx): main workspace UI
-- [hooks/use-transcribble.ts](/Users/dylan/Projects/Dev/transcribble/hooks/use-transcribble.ts): workspace controller
+- [hooks/use-transcribble.ts](/Users/dylan/Projects/Dev/transcribble/hooks/use-transcribble.ts): workspace controller and backend routing integration
+- [lib/transcribble/transcription-backends.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/transcription-backends.ts): browser vs local-helper routing
+- [lib/transcribble/local-helper-client.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/local-helper-client.ts): localhost helper client
+- [lib/transcribble/local-helper-state.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/local-helper-state.ts): helper job to project-state mapping
 - [lib/transcribble/workspace-db.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/workspace-db.ts): IndexedDB and OPFS-backed storage adapter
-- [lib/transcribble/status.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/status.ts): unified user-facing processing language
-- [lib/transcribble/ranges.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/ranges.ts): saved review range helpers
-- [lib/transcribble/search.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/search.ts): local search across sessions
-- [lib/transcribble/export.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/export.ts): text, markdown, and caption export
+- [helper/transcribble_helper.py](/Users/dylan/Projects/Dev/transcribble/helper/transcribble_helper.py): local accelerator service
 
 ## Known Limits
 
-- Speaker turns are still pause-derived. Real diarization and a full manual speaker workflow are not implemented.
-- First-run offline use still depends on one online setup
-- Very large recordings can still be saved locally when storage allows it, but browser memory limits may pause local processing until you retry on stronger hardware
-- Some browsers do not expose durable storage or private file system support
-- Whole-workspace backup and re-import are not implemented yet
+- Browser mode is intentionally conservative and should not be treated as “supports any video.”
+- The helper requires local Python plus native `ffmpeg` / `ffprobe`.
+- Speaker turns in the app stay pause-derived unless a future local diarization pass is enabled.
+- Optional alignment and diarization controls are exposed as helper settings, but the default helper build does not bundle those heavier local dependencies yet.
+- Whole-workspace backup and re-import are still not implemented.

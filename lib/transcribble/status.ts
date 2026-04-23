@@ -10,11 +10,30 @@ interface StageCopy {
 }
 
 const STAGE_COPY: Record<ProjectStep, StageCopy> = {
+  "pending-upload": {
+    badgeLabel: "Waiting",
+    headline: "Waiting to send",
+    summary: "Saved on this device and waiting for the selected transcription backend.",
+    tone: "neutral",
+  },
+  uploading: {
+    badgeLabel: "Sending",
+    headline: "Sending recording",
+    summary: "Sending this recording to the local accelerator.",
+    tone: "working",
+  },
   queued: {
     badgeLabel: "Queued",
     headline: "Waiting to start",
     summary: "Saved on this device and waiting in line.",
     tone: "neutral",
+  },
+  "needs-local-helper": {
+    badgeLabel: "Local helper",
+    headline: "Local accelerator required",
+    summary:
+      "This recording is saved on this device, but it needs the Transcribble Helper running on this machine before transcription can continue.",
+    tone: "warning",
   },
   "getting-browser-ready": {
     badgeLabel: "Setup",
@@ -28,16 +47,40 @@ const STAGE_COPY: Record<ProjectStep, StageCopy> = {
     summary: "Reading the file and preparing the audio on this device.",
     tone: "working",
   },
+  probing: {
+    badgeLabel: "Probing",
+    headline: "Checking the recording",
+    summary: "Probing the recording locally before transcription starts.",
+    tone: "working",
+  },
+  "extracting-audio": {
+    badgeLabel: "Preparing",
+    headline: "Extracting speech audio",
+    summary: "Extracting speech audio locally with the accelerator.",
+    tone: "working",
+  },
+  chunking: {
+    badgeLabel: "Chunking",
+    headline: "Chunking audio",
+    summary: "Splitting the speech audio into resumable local chunks.",
+    tone: "working",
+  },
   transcribing: {
     badgeLabel: "Working",
     headline: "Transcribing now",
-    summary: "Listening locally and building the transcript on this device.",
+    summary: "Building the transcript now.",
+    tone: "working",
+  },
+  merging: {
+    badgeLabel: "Merging",
+    headline: "Merging transcript",
+    summary: "Combining chunk transcripts into one timeline.",
     tone: "working",
   },
   paused: {
-    badgeLabel: "Saved",
-    headline: "Saved and waiting",
-    summary: "Saved on this device. This browser may need more runtime room before it can continue.",
+    badgeLabel: "Paused",
+    headline: "Paused locally",
+    summary: "Saved on this device. This recording needs attention before transcription can continue.",
     tone: "warning",
   },
   saving: {
@@ -56,6 +99,12 @@ const STAGE_COPY: Record<ProjectStep, StageCopy> = {
     badgeLabel: "Problem",
     headline: "Couldn't finish yet",
     summary: "Transcribble hit a problem before this recording could finish.",
+    tone: "warning",
+  },
+  canceled: {
+    badgeLabel: "Canceled",
+    headline: "Transcription canceled",
+    summary: "This recording is still saved on this device, but transcription was canceled.",
     tone: "warning",
   },
 };
@@ -79,18 +128,30 @@ export interface ProjectViewState extends ProjectStatusCopy {
 
 export function getDefaultProjectStep(status: ProjectStatus): ProjectStep {
   switch (status) {
+    case "pending-upload":
+      return "pending-upload";
+    case "uploading":
+      return "uploading";
     case "queued":
       return "queued";
     case "preparing":
       return "getting-recording-ready";
     case "loading-model":
       return "getting-browser-ready";
+    case "extracting-audio":
+      return "extracting-audio";
+    case "chunking":
+      return "chunking";
     case "transcribing":
       return "transcribing";
+    case "merging":
+      return "merging";
     case "paused":
       return "paused";
     case "ready":
       return "ready";
+    case "canceled":
+      return "canceled";
     case "error":
       return "error";
     default:
@@ -158,9 +219,23 @@ export function getProjectViewState(
       canSearchTranscript: false,
       canExport: false,
       canSaveRanges: false,
-      transcriptBadgeLabel: "Saved and waiting",
+      transcriptBadgeLabel: "Paused locally",
       transcriptSearchPlaceholder: "Search unlocks after the transcript is ready",
-      transcriptEmptyTitle: "Saved and waiting",
+      transcriptEmptyTitle: "Paused locally",
+      transcriptEmptyBody: status.summary,
+    };
+  }
+
+  if (status.step === "needs-local-helper") {
+    return {
+      ...status,
+      canUseTranscript: false,
+      canSearchTranscript: false,
+      canExport: false,
+      canSaveRanges: false,
+      transcriptBadgeLabel: "Local accelerator required",
+      transcriptSearchPlaceholder: "Search unlocks after the transcript is ready",
+      transcriptEmptyTitle: "Local accelerator required",
       transcriptEmptyBody: status.summary,
     };
   }
@@ -175,6 +250,20 @@ export function getProjectViewState(
       transcriptBadgeLabel: "Waiting to start",
       transcriptSearchPlaceholder: "Search unlocks after the transcript is ready",
       transcriptEmptyTitle: "This recording is waiting in line",
+      transcriptEmptyBody: status.summary,
+    };
+  }
+
+  if (status.step === "pending-upload" || status.step === "uploading") {
+    return {
+      ...status,
+      canUseTranscript: false,
+      canSearchTranscript: false,
+      canExport: false,
+      canSaveRanges: false,
+      transcriptBadgeLabel: status.step === "uploading" ? "Uploading recording" : "Waiting to upload",
+      transcriptSearchPlaceholder: "Search unlocks after the transcript is ready",
+      transcriptEmptyTitle: status.step === "uploading" ? "Uploading recording" : "Waiting to upload",
       transcriptEmptyBody: status.summary,
     };
   }
@@ -203,6 +292,39 @@ export function getProjectViewState(
       transcriptBadgeLabel: "Preparing recording",
       transcriptSearchPlaceholder: "Search unlocks after the transcript is ready",
       transcriptEmptyTitle: "Getting your recording ready",
+      transcriptEmptyBody: status.summary,
+    };
+  }
+
+  if (
+    status.step === "probing" ||
+    status.step === "extracting-audio" ||
+    status.step === "chunking" ||
+    status.step === "merging"
+  ) {
+    return {
+      ...status,
+      canUseTranscript: false,
+      canSearchTranscript: false,
+      canExport: false,
+      canSaveRanges: false,
+      transcriptBadgeLabel: status.badgeLabel,
+      transcriptSearchPlaceholder: "Search unlocks after the transcript is ready",
+      transcriptEmptyTitle: status.headline,
+      transcriptEmptyBody: status.summary,
+    };
+  }
+
+  if (status.step === "canceled") {
+    return {
+      ...status,
+      canUseTranscript: false,
+      canSearchTranscript: false,
+      canExport: false,
+      canSaveRanges: false,
+      transcriptBadgeLabel: "Transcription canceled",
+      transcriptSearchPlaceholder: "Search unlocks after the transcript is ready",
+      transcriptEmptyTitle: "Transcription canceled",
       transcriptEmptyBody: status.summary,
     };
   }

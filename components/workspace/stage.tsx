@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 
 import { cn } from "@/lib/utils";
 import { formatDuration } from "@/lib/transcribble/transcript";
+import { getBackendLabel } from "@/lib/transcribble/transcription-routing";
 import type {
   SavedRange,
   TranscriptMark,
@@ -61,6 +62,7 @@ interface StageProps {
   onExport: () => void;
   onRetry: () => void;
   onRemove: () => void;
+  onOpenSettings: () => void;
   setupReady: boolean;
   warmingSetup: boolean;
   online: boolean;
@@ -107,6 +109,7 @@ export function Stage(props: StageProps) {
     onExport,
     onRetry,
     onRemove,
+    onOpenSettings,
     setupReady,
     warmingSetup,
     online,
@@ -150,6 +153,8 @@ export function Stage(props: StageProps) {
   const isError = project.status === "error";
   const isPaused = project.status === "paused";
   const isReady = project.status === "ready";
+  const isHelperRoute = project.backend === "local-helper";
+  const needsLocalHelper = project.step === "needs-local-helper";
   const bookmarkActive = marks.some(
     (mark) => mark.kind === "bookmark" && mark.segmentId === focusedSegmentId,
   );
@@ -191,6 +196,8 @@ export function Stage(props: StageProps) {
             <span>{formatDuration(duration)}</span>
             <span className="text-border-strong">·</span>
             <span className="truncate">{project.sourceName}</span>
+            <span className="text-border-strong">·</span>
+            <span>{getBackendLabel(project.backend)}</span>
           </div>
         </div>
 
@@ -244,25 +251,58 @@ export function Stage(props: StageProps) {
         />
       ) : null}
 
+      {isHelperRoute ? (
+        <div className="mx-6 mt-3 flex items-start gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3 text-[12px] leading-5 text-foreground animate-rise-in">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+          <div className="min-w-0">
+            <div className="font-medium">
+              {needsLocalHelper
+                ? "Local accelerator required."
+                : isReady
+                  ? "Local accelerator transcript completed."
+                  : "Local accelerator in progress."}
+            </div>
+            <div className="mt-0.5 text-muted-foreground">
+              {needsLocalHelper
+                ? "Long or memory-heavy recordings stay saved here, but they need the Transcribble Helper running on this machine before transcription can continue."
+                : "This recording was routed to the local accelerator because the browser path was not reliable enough for a full pass."}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {isPaused ? (
         <div className="mx-6 mt-3 flex items-start justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-[12px] leading-5 text-foreground animate-rise-in">
           <div className="flex min-w-0 items-start gap-3">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
             <div className="min-w-0">
-              <div className="font-medium">Saved locally, waiting to continue.</div>
+              <div className="font-medium">
+                {needsLocalHelper ? "Local accelerator required." : "Paused locally."}
+              </div>
               <div className="mt-0.5 text-muted-foreground">
                 {project.detail}
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onRetry}
-            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] font-medium hover:bg-muted ring-focus"
-          >
-            <RotateCw className="h-3.5 w-3.5" />
-            Try again
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {needsLocalHelper ? (
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] font-medium hover:bg-muted ring-focus"
+              >
+                Open settings
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onRetry}
+              className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] font-medium hover:bg-muted ring-focus"
+            >
+              <RotateCw className="h-3.5 w-3.5" />
+              {needsLocalHelper ? "Check again" : "Try again"}
+            </button>
+          </div>
         </div>
       ) : null}
 

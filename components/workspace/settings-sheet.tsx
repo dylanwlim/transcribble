@@ -9,6 +9,7 @@ import {
   SETTINGS_PRIVACY_COPY,
   SETTINGS_SECTION_LABEL,
 } from "@/lib/transcribble/constants";
+import type { HelperModelProfile, LocalHelperModelAvailability } from "@/lib/transcribble/types";
 import { cn } from "@/lib/utils";
 import { buildStorageStatus } from "@/lib/transcribble/storage";
 import { ThemeToggle } from "./theme-toggle";
@@ -33,6 +34,23 @@ interface SettingsSheetProps {
   installPromptAvailable: boolean;
   installed: boolean;
   onInstall: () => void | Promise<void>;
+  helperAvailable: boolean;
+  helperSummary: string;
+  helperUrl: string;
+  helperBackendLabel?: string;
+  helperCacheLabel: string;
+  helperModels: LocalHelperModelAvailability[];
+  helperModelProfile: HelperModelProfile;
+  helperPhraseHints: string;
+  helperSupportsAlignment: boolean;
+  helperSupportsDiarization: boolean;
+  helperAlignmentEnabled: boolean;
+  helperDiarizationEnabled: boolean;
+  onHelperModelProfileChange: (value: HelperModelProfile) => void;
+  onHelperPhraseHintsChange: (value: string) => void;
+  onHelperAlignmentChange: (value: boolean) => void;
+  onHelperDiarizationChange: (value: boolean) => void;
+  onRefreshHelper: () => void | Promise<void>;
 }
 
 const FOCUSABLE_SELECTOR =
@@ -57,6 +75,23 @@ export function SettingsSheet({
   installPromptAvailable,
   installed,
   onInstall,
+  helperAvailable,
+  helperSummary,
+  helperUrl,
+  helperBackendLabel,
+  helperCacheLabel,
+  helperModels,
+  helperModelProfile,
+  helperPhraseHints,
+  helperSupportsAlignment,
+  helperSupportsDiarization,
+  helperAlignmentEnabled,
+  helperDiarizationEnabled,
+  onHelperModelProfileChange,
+  onHelperPhraseHintsChange,
+  onHelperAlignmentChange,
+  onHelperDiarizationChange,
+  onRefreshHelper,
 }: SettingsSheetProps) {
   const titleId = useId();
   const descriptionId = useId();
@@ -272,6 +307,115 @@ export function SettingsSheet({
                 </ActionButton>
               ) : null}
             </Row>
+          </Block>
+
+          <Block title="Local accelerator">
+            <Row
+              label="Transcribble Helper"
+              detail={helperSummary}
+              ready={helperAvailable}
+            >
+              <ActionButton onClick={() => void onRefreshHelper()}>
+                Refresh
+              </ActionButton>
+            </Row>
+
+            <Row
+              label="Local endpoint"
+              detail={helperUrl}
+              ready={helperAvailable}
+            />
+
+            <Row
+              label="Backend and cache"
+              detail={`${helperBackendLabel ?? "Waiting for helper"} · ${helperCacheLabel}`}
+              ready={helperAvailable}
+            />
+
+            <div className="rounded-xl border border-border/80 bg-surface/70 px-3 py-3">
+              <label className="block text-[13px] font-medium text-foreground" htmlFor={`${titleId}-helper-model`}>
+                Model profile
+              </label>
+              <select
+                id={`${titleId}-helper-model`}
+                value={helperModelProfile}
+                onChange={(event) => onHelperModelProfileChange(event.target.value as HelperModelProfile)}
+                className="mt-2 h-10 w-full rounded-lg border border-border bg-background px-3 text-[12px] text-foreground ring-focus"
+              >
+                <option value="fast">Fast mode</option>
+                <option value="accurate">Accuracy mode</option>
+              </select>
+              {helperModels.length > 0 ? (
+                <div className="mt-3 space-y-2 text-[11px] leading-5 text-muted-foreground">
+                  {helperModels.map((model) => (
+                    <div key={model.profile} className="rounded-lg border border-border/70 bg-background/60 px-3 py-2">
+                      <div className="font-medium text-foreground">
+                        {model.label}
+                        {model.recommended ? " · Recommended" : ""}
+                      </div>
+                      <div className="mt-0.5">
+                        {model.modelName}
+                        {typeof model.diskUsageBytes === "number"
+                          ? ` · ${(model.diskUsageBytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
+                          : ""}
+                        {model.downloaded ? " · Cached locally" : " · Downloads on first use"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="rounded-xl border border-border/80 bg-surface/70 px-3 py-3">
+              <label className="block text-[13px] font-medium text-foreground" htmlFor={`${titleId}-helper-hints`}>
+                Phrase dictionary
+              </label>
+              <p className="mt-0.5 text-[11px] leading-5 text-muted-foreground">
+                Names, acronyms, and domain terms to bias the local accelerator.
+              </p>
+              <textarea
+                id={`${titleId}-helper-hints`}
+                value={helperPhraseHints}
+                onChange={(event) => onHelperPhraseHintsChange(event.target.value)}
+                rows={4}
+                placeholder="Acme Ops&#10;RFP&#10;Maya Patel"
+                className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-[12px] text-foreground ring-focus"
+              />
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="flex items-start gap-3 rounded-xl border border-border/80 bg-surface/70 px-3 py-3 text-[12px]">
+                <input
+                  type="checkbox"
+                  checked={helperAlignmentEnabled}
+                  disabled={!helperSupportsAlignment}
+                  onChange={(event) => onHelperAlignmentChange(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-border"
+                />
+                <span>
+                  <span className="block font-medium text-foreground">Optional alignment</span>
+                  <span className="mt-0.5 block text-muted-foreground">
+                    {helperSupportsAlignment ? "Add a slower second pass when supported." : "Unavailable in the current helper build."}
+                  </span>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-3 rounded-xl border border-border/80 bg-surface/70 px-3 py-3 text-[12px]">
+                <input
+                  type="checkbox"
+                  checked={helperDiarizationEnabled}
+                  disabled={!helperSupportsDiarization}
+                  onChange={(event) => onHelperDiarizationChange(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-border"
+                />
+                <span>
+                  <span className="block font-medium text-foreground">Optional diarization</span>
+                  <span className="mt-0.5 block text-muted-foreground">
+                    {helperSupportsDiarization ? "Try local speaker labeling when the machine can handle it." : "Unavailable in the current helper build."}
+                  </span>
+                </span>
+              </label>
+            </div>
           </Block>
 
           {installPromptAvailable || installed ? (

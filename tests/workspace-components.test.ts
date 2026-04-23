@@ -35,6 +35,8 @@ test("sidebar renders setup as a real button with the shared settings label", ()
       modelReady: true,
       mediaReady: true,
       online: true,
+      helperAvailable: false,
+      helperSummary: "Large recordings need the local accelerator",
     }),
   );
 
@@ -65,6 +67,23 @@ test("settings sheet renders the local workspace dialog heading", () => {
       installPromptAvailable: false,
       installed: false,
       onInstall: () => undefined,
+      helperAvailable: false,
+      helperSummary: "Large recordings need the local accelerator",
+      helperUrl: "http://127.0.0.1:7771",
+      helperBackendLabel: undefined,
+      helperCacheLabel: "Model cache size unavailable",
+      helperModels: [],
+      helperModelProfile: "fast",
+      helperPhraseHints: "",
+      helperSupportsAlignment: false,
+      helperSupportsDiarization: false,
+      helperAlignmentEnabled: false,
+      helperDiarizationEnabled: false,
+      onHelperModelProfileChange: () => undefined,
+      onHelperPhraseHintsChange: () => undefined,
+      onHelperAlignmentChange: () => undefined,
+      onHelperDiarizationChange: () => undefined,
+      onRefreshHelper: () => undefined,
     }),
   );
 
@@ -78,9 +97,11 @@ test("empty state copy keeps the local-first em dash copy", () => {
     createElement(EmptyState, {
       onImport: () => undefined,
       onPrimeSetup: () => undefined,
+      onOpenSettings: () => undefined,
       setupReady: false,
       warming: false,
       online: true,
+      helperAvailable: false,
       supportedFormats: ["MP3", "MP4", "M4A", "WAV"],
     }),
   );

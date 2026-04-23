@@ -12,6 +12,14 @@ import {
 
 import { buildTranscriptDocument, updateTranscriptSegmentText } from "@/lib/transcribble/analysis";
 import {
+  cancelLocalHelperJob,
+  createLocalHelperJob,
+  fetchLocalHelperCapabilities,
+  readLocalHelperJob,
+  retryLocalHelperJob,
+  uploadLocalHelperSourceFile,
+} from "@/lib/transcribble/local-helper-client";
+import {
   MODEL_LABELS,
   RUNTIME_LABELS,
   type Runtime,
@@ -29,7 +37,7 @@ import {
   warmMediaRuntime,
 } from "@/lib/transcribble/media";
 import {
-  createProjectFromFile,
+  createProjectFromImportedFile,
   recoverPersistedProjects,
   updateProjectTimestamp,
 } from "@/lib/transcribble/projects";
@@ -39,6 +47,11 @@ import {
   normalizeRangeBounds,
 } from "@/lib/transcribble/ranges";
 import { searchProjectEntries, searchProjectLibrary } from "@/lib/transcribble/search";
+import {
+  buildLocalHelperRequiredDetail,
+  projectNeedsHelperReconnect,
+  syncLocalHelperJobIntoProject,
+} from "@/lib/transcribble/local-helper-state";
 import { applyProjectStep } from "@/lib/transcribble/status";
 import {
   readBrowserStorageState,
@@ -51,9 +64,16 @@ import {
   formatBytes,
   formatDuration,
 } from "@/lib/transcribble/transcript";
+import {
+  chooseTranscriptionBackend,
+  getBackendLabel,
+} from "@/lib/transcribble/transcription-routing";
 import type {
+  HelperModelProfile,
   HighlightColor,
   LibrarySearchResult,
+  LocalHelperCapabilities,
+  LocalHelperJob,
   SavedRange,
   TranscriptChunk,
   TranscriptDocument,
@@ -152,12 +172,27 @@ interface SetupJob {
   reject: (error: Error) => void;
 }
 
+interface HelperPreferences {
+  modelProfile: HelperModelProfile;
+  phraseHints: string;
+  enableAlignment: boolean;
+  enableDiarization: boolean;
+}
+
 const UI_STATE_KEY = "transcribble-ui-state-v2";
 const ASSET_STATE_KEY = "transcribble-asset-state-v1";
+const HELPER_PREFERENCES_KEY = "transcribble-helper-preferences-v1";
 
 const DEFAULT_ASSET_STATE: PersistedAssetState = {
   modelReady: false,
   mediaReady: false,
+};
+
+const DEFAULT_HELPER_PREFERENCES: HelperPreferences = {
+  modelProfile: "fast",
+  phraseHints: "",
+  enableAlignment: false,
+  enableDiarization: false,
 };
 
 function readStoredJson<T>(key: string) {
@@ -221,10 +256,17 @@ function toProjectFailureSummary(message: string) {
   }
 
   if (lower.includes("out of memory") || lower.includes("memory")) {
-    return "This recording was too large for the browser memory that was available. The recording is still saved on this device, and you can try again with a shorter file or a desktop browser.";
+    return "This recording was too large for the browser memory that was available. The recording is still saved on this device, and it should be retried with the local accelerator.";
   }
 
   return `${message} The recording is still saved on this device, and you can try again when you're ready.`;
+}
+
+function normalizePhraseHints(value: string) {
+  return value
+    .split(/\r?\n|,/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 export function useTranscribble() {
@@ -243,6 +285,8 @@ export function useTranscribble() {
   const copiedTimeoutRef = useRef<number | null>(null);
   const projectsRef = useRef<TranscriptProject[]>([]);
   const selectedProjectIdRef = useRef<string | null>(null);
+  const helperInFlightRef = useRef<Set<string>>(new Set());
+  const helperUrlRef = useRef<string | null>(null);
 
   const [projects, setProjects] = useState<TranscriptProject[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -268,6 +312,10 @@ export function useTranscribble() {
     online: typeof navigator === "undefined" ? true : navigator.onLine,
   }));
   const [storageState, setStorageState] = useState<BrowserStorageState | null>(null);
+  const [helperCapabilities, setHelperCapabilities] = useState<LocalHelperCapabilities | null>(null);
+  const [helperPreferences, setHelperPreferences] = useState<HelperPreferences>(
+    () => readStoredJson<HelperPreferences>(HELPER_PREFERENCES_KEY) ?? DEFAULT_HELPER_PREFERENCES,
+  );
   const [installState, setInstallState] = useState<InstallState>({
     shellReady: false,
     installPromptAvailable: false,
@@ -288,6 +336,13 @@ export function useTranscribble() {
     const nextState = await readBrowserStorageState();
     setStorageState(nextState);
     return nextState;
+  }, []);
+
+  const refreshHelperCapabilities = useCallback(async () => {
+    const nextCapabilities = await fetchLocalHelperCapabilities();
+    helperUrlRef.current = nextCapabilities.available ? nextCapabilities.url : null;
+    setHelperCapabilities(nextCapabilities);
+    return nextCapabilities;
   }, []);
 
   const applyProjectUpdate = useCallback(
@@ -371,7 +426,13 @@ export function useTranscribble() {
   );
 
   const queuedProjects = useMemo(
-    () => projects.filter((project) => project.status === "queued"),
+    () =>
+      projects.filter(
+        (project) =>
+          project.status === "queued" &&
+          project.backend !== "local-helper" &&
+          project.backend !== "external",
+      ),
     [projects],
   );
 
@@ -379,12 +440,17 @@ export function useTranscribble() {
     () => ({
       ready: projects.filter((project) => project.status === "ready"),
       active: projects.filter((project) =>
+        project.status === "pending-upload" ||
+        project.status === "uploading" ||
         project.status === "queued" ||
         project.status === "preparing" ||
         project.status === "loading-model" ||
+        project.status === "extracting-audio" ||
+        project.status === "chunking" ||
+        project.status === "merging" ||
         project.status === "transcribing",
       ),
-      errored: projects.filter((project) => project.status === "error"),
+      errored: projects.filter((project) => project.status === "error" || project.status === "canceled"),
     }),
     [projects],
   );
@@ -400,8 +466,13 @@ export function useTranscribble() {
   const selectedFileStoreKey = selectedProject?.fileStoreKey ?? null;
 
   const isBusy =
+    selectedProject?.status === "pending-upload" ||
+    selectedProject?.status === "uploading" ||
     selectedProject?.status === "preparing" ||
     selectedProject?.status === "loading-model" ||
+    selectedProject?.status === "extracting-audio" ||
+    selectedProject?.status === "chunking" ||
+    selectedProject?.status === "merging" ||
     selectedProject?.status === "transcribing" ||
     queuedProjects.length > 0;
 
@@ -503,13 +574,13 @@ export function useTranscribble() {
   );
 
   const pauseProjectAfterImport = useCallback(
-    (projectId: string, message: string) => {
+    (projectId: string, message: string, step: "paused" | "needs-local-helper" = "paused") => {
       applyProjectUpdate(
         projectId,
         (project) =>
           applyProjectStep(project, {
             status: "paused",
-            step: "paused",
+            step,
             progress: 0,
             detail: message,
             error: undefined,
@@ -523,6 +594,175 @@ export function useTranscribble() {
       finishJob();
     },
     [applyProjectUpdate, finishJob],
+  );
+
+  const syncHelperJobIntoProject = useCallback(
+    (
+      projectId: string,
+      job: LocalHelperJob,
+      options: {
+        persist?: boolean;
+        select?: boolean;
+      } = {},
+    ) => {
+      applyProjectUpdate(projectId, (project) => syncLocalHelperJobIntoProject(project, job), {
+        persist: options.persist ?? true,
+        select: options.select ?? false,
+      });
+    },
+    [applyProjectUpdate],
+  );
+
+  const startHelperTranscriptionForProject = useCallback(
+    async (
+      projectId: string,
+      file?: File,
+      options?: {
+        reason?: string;
+        browserFailure?: boolean;
+      },
+    ) => {
+      if (!helperCapabilities?.available || !helperUrlRef.current) {
+        const fallbackMessage = buildLocalHelperRequiredDetail(
+          options?.reason ?? helperCapabilities?.reason ?? "Transcribble Helper was not reachable on localhost.",
+        );
+        pauseProjectAfterImport(projectId, fallbackMessage, "needs-local-helper");
+        return;
+      }
+
+      if (helperInFlightRef.current.has(projectId)) {
+        return;
+      }
+
+      helperInFlightRef.current.add(projectId);
+
+      try {
+        const project = projectsRef.current.find((item) => item.id === projectId);
+        if (!project) {
+          return;
+        }
+
+        const sourceFile = file ?? (await getProjectFile(project.fileStoreKey));
+        if (!sourceFile) {
+          finishProjectWithError(projectId, "The source media could not be found in local storage.");
+          return;
+        }
+
+        applyProjectUpdate(
+          projectId,
+          (current) =>
+            applyProjectStep(
+              {
+                ...current,
+                backend: "local-helper",
+                backendJobId: current.backendJobId ?? current.id,
+                backendStatus: "pending_upload",
+                transcriptionRoute: "local-helper",
+              },
+              {
+                status: "pending-upload",
+                step: "pending-upload",
+                progress: 0,
+                detail:
+                  options?.reason ??
+                  "Saved on this device. Waiting to send the recording to the local accelerator.",
+                error: undefined,
+              },
+            ),
+          { persist: true, select: true },
+        );
+
+        const { job } = await createLocalHelperJob(helperUrlRef.current, {
+          jobId: project.backendJobId ?? project.id,
+          projectId: project.id,
+          sourceName: project.sourceName,
+          sourceType: project.sourceType,
+          sourceSize: project.sourceSize,
+          mediaKind: project.mediaKind,
+          modelProfile: helperPreferences.modelProfile,
+          phraseHints: normalizePhraseHints(helperPreferences.phraseHints),
+          enableAlignment: helperPreferences.enableAlignment,
+          enableDiarization: helperPreferences.enableDiarization,
+        });
+
+        syncHelperJobIntoProject(projectId, job, { persist: true, select: true });
+
+        const uploadResult = await uploadLocalHelperSourceFile(
+          helperUrlRef.current,
+          job.id,
+          sourceFile,
+          (progress) => {
+            applyProjectUpdate(
+              projectId,
+              (current) =>
+                applyProjectStep(
+                  {
+                    ...current,
+                    backend: "local-helper",
+                    backendJobId: job.id,
+                    backendStatus: "uploading",
+                    transcriptionRoute: "local-helper",
+                  },
+                  {
+                    status: "uploading",
+                    step: "uploading",
+                    progress: Math.max(4, Math.round(progress * 0.24)),
+                    detail: `Sending ${current.sourceName} to the local accelerator.`,
+                    error: undefined,
+                  },
+                ),
+              { persist: true },
+            );
+          },
+        );
+
+        syncHelperJobIntoProject(projectId, uploadResult.job, { persist: true, select: true });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Could not start the local accelerator for this recording.";
+
+        applyProjectUpdate(
+          projectId,
+          (project) =>
+            applyProjectStep(
+              {
+                ...project,
+                backend: "local-helper",
+                backendJobId: project.backendJobId ?? project.id,
+                backendStatus: "failed",
+                transcriptionRoute: "local-helper",
+              },
+              {
+                status: "error",
+                step: "error",
+                progress: 0,
+                detail: message,
+                error: message,
+              },
+            ),
+          { persist: true, select: true },
+        );
+
+        setNotice({
+          tone: "error",
+          message,
+        });
+      } finally {
+        helperInFlightRef.current.delete(projectId);
+      }
+    },
+    [
+      applyProjectUpdate,
+      finishProjectWithError,
+      helperCapabilities?.available,
+      helperCapabilities?.reason,
+      helperPreferences.enableAlignment,
+      helperPreferences.enableDiarization,
+      helperPreferences.modelProfile,
+      helperPreferences.phraseHints,
+      pauseProjectAfterImport,
+      syncHelperJobIntoProject,
+    ],
   );
 
   workerListenerRef.current = (event: MessageEvent<WorkerMessage>) => {
@@ -731,8 +971,9 @@ export function useTranscribble() {
         break;
 
       case "error": {
+        const isMemoryError = payload.data?.toLowerCase().includes("memory") ?? false;
         const message =
-          payload.data?.toLowerCase().includes("memory")
+          isMemoryError
             ? "The browser ran out of memory while transcribing. Try a shorter file or use a desktop browser."
             : payload.data ?? "Local transcription failed. Try again with a smaller file or a recent Chrome or Edge build.";
 
@@ -747,6 +988,20 @@ export function useTranscribble() {
         }
 
         if (projectId) {
+          const currentProject = projectsRef.current.find((project) => project.id === projectId);
+          if (
+            isMemoryError &&
+            currentProject?.backend !== "local-helper"
+          ) {
+            finishJob();
+            void startHelperTranscriptionForProject(projectId, undefined, {
+              browserFailure: true,
+              reason:
+                "The browser ran out of memory locally, so Transcribble is retrying this recording with the local accelerator.",
+            });
+            return;
+          }
+
           finishProjectWithError(projectId, message);
         }
         break;
@@ -874,7 +1129,11 @@ export function useTranscribble() {
         }
 
         if (error instanceof LocalPreparationRiskError) {
-          pauseProjectAfterImport(project.id, error.message);
+          finishJob();
+          await startHelperTranscriptionForProject(project.id, file, {
+            reason: error.message,
+            browserFailure: true,
+          });
           return;
         }
 
@@ -885,10 +1144,11 @@ export function useTranscribble() {
       applyProjectUpdate,
       capabilityIssue,
       finishProjectWithError,
+      finishJob,
       getWorker,
       markMediaPrimed,
-      pauseProjectAfterImport,
       runtime,
+      startHelperTranscriptionForProject,
     ],
   );
 
@@ -911,6 +1171,15 @@ export function useTranscribble() {
       if (!cancelled) {
         setStorageState(state);
       }
+    });
+
+    void refreshHelperCapabilities().then((capabilities) => {
+      if (cancelled) {
+        return;
+      }
+
+      helperUrlRef.current = capabilities.available ? capabilities.url : null;
+      setHelperCapabilities(capabilities);
     });
 
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
@@ -1017,7 +1286,7 @@ export function useTranscribble() {
         mediaUrlRef.current = null;
       }
     };
-  }, []);
+  }, [refreshHelperCapabilities]);
 
   useEffect(() => {
     writeStoredJson(ASSET_STATE_KEY, {
@@ -1036,6 +1305,20 @@ export function useTranscribble() {
   ]);
 
   useEffect(() => {
+    writeStoredJson(HELPER_PREFERENCES_KEY, helperPreferences);
+  }, [helperPreferences]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      void refreshHelperCapabilities();
+    }, 10_000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [refreshHelperCapabilities]);
+
+  useEffect(() => {
     if (!workspaceReady || activeJobRef.current || queuedProjects.length === 0) {
       return;
     }
@@ -1047,6 +1330,79 @@ export function useTranscribble() {
 
     void processProject(nextProject);
   }, [processProject, queuedProjects, workspaceReady]);
+
+  const activeHelperProjects = useMemo(
+    () => projects.filter((project) => projectNeedsHelperReconnect(project)),
+    [projects],
+  );
+
+  useEffect(() => {
+    if (
+      !workspaceReady ||
+      activeHelperProjects.length === 0 ||
+      !helperCapabilities?.available ||
+      !helperUrlRef.current
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const syncProjects = async () => {
+      const helperUrl = helperUrlRef.current;
+      if (!helperUrl) {
+        return;
+      }
+
+      for (const project of activeHelperProjects) {
+        if (cancelled) {
+          return;
+        }
+
+        if (!project.backendJobId) {
+          continue;
+        }
+
+        if (helperInFlightRef.current.has(project.id)) {
+          continue;
+        }
+
+        try {
+          const { job } = await readLocalHelperJob(helperUrl, project.backendJobId);
+
+          if (cancelled) {
+            return;
+          }
+
+          syncHelperJobIntoProject(project.id, job, { persist: true });
+        } catch {
+          if (
+            project.status === "pending-upload" ||
+            project.status === "uploading" ||
+            project.status === "queued"
+          ) {
+            await startHelperTranscriptionForProject(project.id);
+          }
+        }
+      }
+    };
+
+    void syncProjects();
+    const intervalId = window.setInterval(() => {
+      void syncProjects();
+    }, 2_500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [
+    activeHelperProjects,
+    helperCapabilities?.available,
+    startHelperTranscriptionForProject,
+    syncHelperJobIntoProject,
+    workspaceReady,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1097,6 +1453,7 @@ export function useTranscribble() {
       }
 
       const nextProjects: TranscriptProject[] = [];
+      const nextHelperStarts: Array<{ project: TranscriptProject; file: File; detail: string }> = [];
       const errors: string[] = [];
       let workingStorageState = storageState;
 
@@ -1108,11 +1465,50 @@ export function useTranscribble() {
           continue;
         }
 
-        const project = createProjectFromFile(file, runtime);
+        const backendDecision = chooseTranscriptionBackend(file, {
+          browserLocalAvailable: capabilityIssue === null,
+          helperAvailable: Boolean(helperCapabilities?.available),
+          deviceMemoryGb:
+            typeof navigator === "undefined"
+              ? null
+              : (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? null,
+          hardwareConcurrency:
+            typeof navigator === "undefined" ? null : navigator.hardwareConcurrency ?? null,
+        });
+
+        let project = createProjectFromImportedFile(
+          file,
+          runtime,
+          backendDecision.backend,
+        );
+
+        if (backendDecision.backend === "local-helper" && backendDecision.requiresHelperInstall) {
+          project = applyProjectStep(
+            {
+              ...project,
+              backend: "local-helper",
+              transcriptionRoute: "local-helper",
+            },
+            {
+              status: "paused",
+              step: "needs-local-helper",
+              progress: 0,
+              detail: backendDecision.reason,
+              error: undefined,
+            },
+          );
+        }
 
         try {
           await putProjectWithFile(project, file);
           nextProjects.push(project);
+          if (backendDecision.backend === "local-helper" && !backendDecision.requiresHelperInstall) {
+            nextHelperStarts.push({
+              project,
+              file,
+              detail: backendDecision.reason,
+            });
+          }
           workingStorageState =
             workingStorageState && validation.requiredStorageBytes
               ? {
@@ -1153,7 +1549,9 @@ export function useTranscribble() {
       }
 
       if (nextProjects.length > 0) {
-        setProjects((previous) => sortProjects([...nextProjects, ...previous]));
+        const mergedProjects = sortProjects([...nextProjects, ...projectsRef.current]);
+        projectsRef.current = mergedProjects;
+        setProjects(mergedProjects);
 
         if (!selectedProjectId) {
           setSelectedProjectId(nextProjects[0]?.id ?? null);
@@ -1161,6 +1559,11 @@ export function useTranscribble() {
         }
 
         void refreshStorageState();
+        nextHelperStarts.forEach(({ project, file, detail }) => {
+          void startHelperTranscriptionForProject(project.id, file, {
+            reason: detail,
+          });
+        });
       }
 
       if (errors.length > 0) {
@@ -1169,16 +1572,40 @@ export function useTranscribble() {
           message: errors.join(" "),
         });
       } else if (nextProjects.length > 0) {
+        const browserCount = nextProjects.filter((project) => project.backend === "browser").length;
+        const helperCount = nextHelperStarts.length;
+        const helperRequiredCount = nextProjects.filter(
+          (project) => project.step === "needs-local-helper",
+        ).length;
         setNotice({
           tone: "info",
           message:
-            nextProjects.length === 1
-              ? `Queued ${nextProjects[0].sourceName} for local transcription.`
-              : `Queued ${nextProjects.length} files for local transcription.`,
+            helperRequiredCount > 0 && browserCount === 0 && helperCount === 0
+              ? helperRequiredCount === 1
+                ? `Saved ${nextProjects[0]?.sourceName} locally. It needs the local accelerator before transcription can start.`
+                : `Saved ${helperRequiredCount} recordings locally. They need the local accelerator before transcription can start.`
+              : helperCount > 0 && browserCount > 0
+                ? `Queued ${browserCount} browser job${browserCount === 1 ? "" : "s"} and started ${helperCount} local accelerator job${helperCount === 1 ? "" : "s"}.`
+                : helperCount > 0
+                  ? helperCount === 1
+                    ? `Started the local accelerator for ${nextProjects.find((project) => project.backend === "local-helper")?.sourceName}.`
+                    : `Started the local accelerator for ${helperCount} recordings.`
+                  : nextProjects.length === 1
+                    ? `Queued ${nextProjects[0].sourceName} for browser transcription.`
+                    : `Queued ${nextProjects.length} files for browser transcription.`,
         });
       }
     },
-    [persistProjectSelection, refreshStorageState, runtime, selectedProjectId, storageState],
+    [
+      capabilityIssue,
+      helperCapabilities?.available,
+      persistProjectSelection,
+      refreshStorageState,
+      runtime,
+      selectedProjectId,
+      startHelperTranscriptionForProject,
+      storageState,
+    ],
   );
 
   const openFilePicker = useCallback(() => {
@@ -1792,7 +2219,39 @@ export function useTranscribble() {
   bookmarkShortcutRef.current = () => upsertMark("bookmark");
 
   const retryProject = useCallback(
-    (projectId: string) => {
+    async (projectId: string) => {
+      const project = projectsRef.current.find((item) => item.id === projectId);
+      if (!project) {
+        return;
+      }
+
+      if (project.backend === "local-helper" && project.backendJobId && helperUrlRef.current) {
+        try {
+          const { job } = await retryLocalHelperJob(helperUrlRef.current, project.backendJobId);
+          syncHelperJobIntoProject(projectId, job, { persist: true, select: true });
+        } catch (error) {
+          setNotice({
+            tone: "error",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Could not retry the local accelerator for this recording.",
+          });
+        }
+        return;
+      }
+
+      if (project.backend === "local-helper" || project.step === "needs-local-helper") {
+        await startHelperTranscriptionForProject(
+          projectId,
+          undefined,
+          {
+            reason: project.detail || buildLocalHelperRequiredDetail(),
+          },
+        );
+        return;
+      }
+
       applyProjectUpdate(
         projectId,
         (project) =>
@@ -1806,7 +2265,11 @@ export function useTranscribble() {
         { persist: true, select: true },
       );
     },
-    [applyProjectUpdate],
+    [
+      applyProjectUpdate,
+      startHelperTranscriptionForProject,
+      syncHelperJobIntoProject,
+    ],
   );
 
   const removeProject = useCallback(
@@ -1830,6 +2293,9 @@ export function useTranscribble() {
       }
 
       abortActiveJob(projectId);
+      if (project.backend === "local-helper" && project.backendJobId && helperUrlRef.current) {
+        void cancelLocalHelperJob(helperUrlRef.current, project.backendJobId);
+      }
 
       const nextProjects = projectsRef.current.filter((item) => item.id !== projectId);
       setProjects(sortProjects(nextProjects));
@@ -1999,6 +2465,34 @@ export function useTranscribble() {
     }));
   }, []);
 
+  const updateHelperModelProfile = useCallback((modelProfile: HelperModelProfile) => {
+    setHelperPreferences((previous) => ({
+      ...previous,
+      modelProfile,
+    }));
+  }, []);
+
+  const updateHelperPhraseHints = useCallback((phraseHints: string) => {
+    setHelperPreferences((previous) => ({
+      ...previous,
+      phraseHints,
+    }));
+  }, []);
+
+  const updateHelperAlignment = useCallback((enableAlignment: boolean) => {
+    setHelperPreferences((previous) => ({
+      ...previous,
+      enableAlignment,
+    }));
+  }, []);
+
+  const updateHelperDiarization = useCallback((enableDiarization: boolean) => {
+    setHelperPreferences((previous) => ({
+      ...previous,
+      enableDiarization,
+    }));
+  }, []);
+
   const currentFileMeta = useMemo(
     () =>
       selectedProject
@@ -2010,29 +2504,44 @@ export function useTranscribble() {
                 ? formatDuration(selectedProject.duration)
                 : selectedProject.status === "error"
                   ? "Unavailable"
+                  : selectedProject.step === "needs-local-helper"
+                    ? "Needs local accelerator"
                   : selectedProject.status === "paused"
-                    ? "Saved and waiting"
+                    ? "Paused locally"
                   : selectedProject.status === "queued"
                     ? "Waiting to start"
+                    : selectedProject.step === "probing"
+                      ? "Checking recording"
                     : selectedProject.step === "getting-browser-ready"
                       ? "Waiting for browser setup"
                       : selectedProject.step === "transcribing"
                         ? "Transcribing"
                         : "Getting ready",
-            runtimeLabel: selectedProject.runtime
-              ? RUNTIME_LABELS[selectedProject.runtime]
-              : selectedProject.status === "error"
-                ? "Didn't start"
-                : selectedProject.status === "paused"
-                  ? "Saved locally"
-                : "Starting local tools",
-            modelLabel: selectedProject.runtime ? MODEL_LABELS[selectedProject.runtime] : "Whisper base timestamped",
+            runtimeLabel:
+              selectedProject.backend === "browser" || !selectedProject.backend
+                ? selectedProject.runtime
+                  ? RUNTIME_LABELS[selectedProject.runtime]
+                  : selectedProject.status === "error"
+                    ? "Didn't start"
+                    : selectedProject.status === "paused"
+                      ? "Paused locally"
+                      : "Starting browser tools"
+                : getBackendLabel(selectedProject.backend),
+            modelLabel:
+              selectedProject.backend === "browser" || !selectedProject.backend
+                ? selectedProject.runtime
+                  ? MODEL_LABELS[selectedProject.runtime]
+                  : "Whisper base timestamped"
+                : selectedProject.transcriptionModelName ??
+                  (selectedProject.transcriptionModelProfile === "accurate"
+                    ? "large-v3 class local model"
+                    : "distil-large-v3 class local model"),
             fileSizeLabel: formatBytes(selectedProject.sourceSize),
           }
         : {
             fileMeta: "No project selected",
             durationLabel: "No recording yet",
-            runtimeLabel: RUNTIME_LABELS[runtime],
+            runtimeLabel: getBackendLabel("browser"),
             modelLabel: MODEL_LABELS[runtime],
             fileSizeLabel: "0 B",
           },
@@ -2082,6 +2591,8 @@ export function useTranscribble() {
     runtime,
     assetSetup,
     storageState,
+    helperCapabilities,
+    helperPreferences,
     installState,
     dragActive,
     copied,
@@ -2129,6 +2640,11 @@ export function useTranscribble() {
     refreshStorageState,
     resetSetupState,
     promptInstall,
+    refreshHelperCapabilities,
+    updateHelperAlignment,
+    updateHelperDiarization,
+    updateHelperModelProfile,
+    updateHelperPhraseHints,
     retryProject,
     removeProject,
     openLibrarySearchResult,

@@ -16,6 +16,7 @@ test("createProjectFromFile creates a valid project", () => {
   assert.equal(project.sourceName, "meeting-notes.mp3");
   assert.equal(project.status, "queued");
   assert.equal(project.mediaKind, "audio");
+  assert.equal(project.backend, "browser");
   assert.equal(project.runtime, "wasm");
   assert.deepEqual(project.marks, []);
   assert.deepEqual(project.savedRanges, []);

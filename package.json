@@ -5,10 +5,12 @@
   "scripts": {
     "build": "next build",
     "dev": "next dev",
+    "helper:install": "node scripts/helper-install.mjs",
+    "helper:start": "node scripts/helper-start.mjs",
     "lint": "eslint .",
     "start": "next start",
     "test": "node --import tsx --test tests/**/*.test.ts",
-    "typecheck": "next typegen && tsc --noEmit",
+    "typecheck": "node -e \"require('fs').rmSync('.next/types',{recursive:true,force:true})\" && next typegen && tsc --noEmit",
     "validate": "npm run lint && npm run typecheck && npm test && npm run build"
   },
   "dependencies": {

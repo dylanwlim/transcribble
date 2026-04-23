@@ -138,11 +138,25 @@ test("getProjectViewState explains paused local processing clearly", () => {
     ...buildProject(),
     status: "paused",
     step: "paused",
-    detail: "Saved on this device. This browser may need more runtime room before it can continue.",
+    detail: "Saved on this device. This recording needs attention before transcription can continue.",
   });
 
   assert.equal(view.canUseTranscript, false);
-  assert.equal(view.transcriptBadgeLabel, "Saved and waiting");
-  assert.equal(view.transcriptEmptyTitle, "Saved and waiting");
+  assert.equal(view.transcriptBadgeLabel, "Paused locally");
+  assert.equal(view.transcriptEmptyTitle, "Paused locally");
   assert.match(view.transcriptEmptyBody, /saved on this device/i);
+});
+
+test("getProjectViewState explains when the local accelerator is required", () => {
+  const view = getProjectViewState({
+    ...buildProject(),
+    status: "paused",
+    step: "needs-local-helper",
+    detail: "Large recordings need the Transcribble Helper running on this machine.",
+  });
+
+  assert.equal(view.canUseTranscript, false);
+  assert.equal(view.transcriptBadgeLabel, "Local accelerator required");
+  assert.equal(view.transcriptEmptyTitle, "Local accelerator required");
+  assert.match(view.transcriptEmptyBody, /Transcribble Helper/i);
 });

@@ -60,6 +60,8 @@ interface SidebarProps {
   modelReady: boolean;
   mediaReady: boolean;
   online: boolean;
+  helperAvailable: boolean;
+  helperSummary: string;
   className?: string;
   headerAction?: React.ReactNode;
   showSearchShortcut?: boolean;
@@ -96,10 +98,12 @@ function StatusDot({ project }: { project: TranscriptProject }) {
     );
   }
   if (project.status === "paused") {
+    const pausedLabel =
+      project.step === "needs-local-helper" ? "Local accelerator required" : "Paused locally";
     return (
       <span
-        title="Saved and waiting"
-        aria-label="Saved and waiting"
+        title={pausedLabel}
+        aria-label={pausedLabel}
         className="flex h-2 w-2 shrink-0 rounded-full bg-transparent ring-1 ring-inset ring-warning"
       />
     );
@@ -151,12 +155,19 @@ function ProjectRow({
   const duration =
     project.transcript?.stats.duration ?? project.duration ?? 0;
   const isActive =
+    project.status === "pending-upload" ||
+    project.status === "uploading" ||
     project.status === "queued" ||
     project.status === "preparing" ||
     project.status === "loading-model" ||
+    project.status === "extracting-audio" ||
+    project.status === "chunking" ||
+    project.status === "merging" ||
     project.status === "transcribing";
-  const isRetryable = project.status === "error" || project.status === "paused";
-  const statusMessageTone = project.status === "error" ? "text-warning" : "text-muted-foreground";
+  const isRetryable =
+    project.status === "error" || project.status === "paused" || project.status === "canceled";
+  const statusMessageTone =
+    project.status === "error" || project.status === "canceled" ? "text-warning" : "text-muted-foreground";
   const progress = Math.max(0, Math.min(100, project.progress));
 
   useEffect(() => {
@@ -440,6 +451,8 @@ export function Sidebar({
   modelReady,
   mediaReady,
   online,
+  helperAvailable,
+  helperSummary,
   className,
   headerAction,
   showSearchShortcut = true,
@@ -684,6 +697,9 @@ export function Sidebar({
         </div>
         <div className="mt-2 text-[10px] uppercase tracking-[0.16em] text-subtle">
           {setupStatusTitle}
+        </div>
+        <div className="mt-1 text-[10px] leading-4 text-muted-foreground">
+          {helperAvailable ? "Local accelerator ready." : helperSummary}
         </div>
       </div>
     </aside>

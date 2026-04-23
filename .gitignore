@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/helper/.venv
 
 # next.js
 /.next/

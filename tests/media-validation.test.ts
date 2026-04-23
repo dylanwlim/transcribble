@@ -107,8 +107,8 @@ test("supported format labels stay aligned with the UI helper", () => {
 
 test("shared copy removes the old upload language", () => {
   assert.doesNotMatch(UNSUPPORTED_FILE_TYPE_MESSAGE, /upload/i);
-  assert.doesNotMatch(SETTINGS_PRIVACY_COPY, /transcript work/i);
-  assert.doesNotMatch(SETTINGS_PRIVACY_COPY, /Keep uploads under 200 MB/i);
+  assert.doesNotMatch(SETTINGS_PRIVACY_COPY, /cloud transcription/i);
+  assert.match(SETTINGS_PRIVACY_COPY, /local accelerator/i);
 });
 
 function makeSizedFile(name: string, type: string, size: number) {

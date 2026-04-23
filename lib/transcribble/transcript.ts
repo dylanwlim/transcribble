@@ -110,6 +110,8 @@ function createSegment(
     typeof last?.timestamp[1] === "number"
       ? last.timestamp[1]
       : Math.max(start + Math.min(Math.max(countWords(text) / 2.8, 2), 8), start);
+  const speakerLabels = new Set(parts.map((part) => part.speakerLabel).filter(Boolean));
+  const attributions = new Set(parts.map((part) => part.attribution).filter(Boolean));
 
   return {
     id: `${projectId}-segment-${index + 1}`,
@@ -123,6 +125,8 @@ function createSegment(
     searchText: normalizeSearchText(text),
     tokens: tokenizeText(text),
     reviewReasons: getSegmentReviewReasons(text),
+    speakerLabel: speakerLabels.size === 1 ? [...speakerLabels][0] : undefined,
+    attribution: attributions.size === 1 ? [...attributions][0] : undefined,
   };
 }
 

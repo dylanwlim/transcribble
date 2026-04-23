@@ -17,7 +17,7 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Transcribble",
   description:
-    "Private voice workspace for turning recordings into searchable, editable knowledge on this device.",
+    "Local-first voice workspace for turning recordings into searchable, editable knowledge, with a browser path for smaller recordings and a local accelerator for large media.",
   manifest: "/manifest.webmanifest",
   icons: {
     icon: "/icon",

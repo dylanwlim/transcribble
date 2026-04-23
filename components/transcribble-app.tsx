@@ -12,6 +12,7 @@ import {
 } from "@/lib/transcribble/constants";
 import { formatShortcutTitle } from "@/lib/transcribble/shortcuts";
 import { getProjectViewState } from "@/lib/transcribble/status";
+import { formatBytes } from "@/lib/transcribble/transcript";
 import type { HighlightColor } from "@/lib/transcribble/types";
 
 import { CommandPalette } from "@/components/workspace/command-palette";
@@ -49,6 +50,8 @@ export function TranscribbleApp() {
     capabilityIssue,
     assetSetup,
     storageState,
+    helperCapabilities,
+    helperPreferences,
     installState,
     dragActive,
     copied,
@@ -86,6 +89,11 @@ export function TranscribbleApp() {
     askForPersistentStorage,
     resetSetupState,
     promptInstall,
+    refreshHelperCapabilities,
+    updateHelperAlignment,
+    updateHelperDiarization,
+    updateHelperModelProfile,
+    updateHelperPhraseHints,
     retryProject,
     removeProject,
     openLibrarySearchResult,
@@ -124,6 +132,14 @@ export function TranscribbleApp() {
   const setupReady = assetSetup.modelReady && assetSetup.mediaReady;
   const effectiveOnline = workspaceReady ? assetSetup.online : true;
   const warmingSetup = assetSetup.warmingModel || assetSetup.warmingMedia;
+  const helperAvailable = helperCapabilities?.available ?? false;
+  const helperSummary = helperAvailable
+    ? "Reachable on localhost. Large and long recordings route here by default."
+    : helperCapabilities?.reason ?? "Large recordings need the local accelerator running on this machine.";
+  const helperCacheLabel =
+    typeof helperCapabilities?.cacheBytes === "number"
+      ? `${formatBytes(helperCapabilities.cacheBytes)} cached locally`
+      : "Model cache size unavailable";
 
   const primeWorkspaceSetup = useCallback(async () => {
     if (!assetSetup.modelReady) {
@@ -285,6 +301,8 @@ export function TranscribbleApp() {
         modelReady={assetSetup.modelReady}
         mediaReady={assetSetup.mediaReady}
         online={effectiveOnline}
+        helperAvailable={helperAvailable}
+        helperSummary={helperSummary}
         className={className}
         headerAction={headerAction}
         showSearchShortcut={showSearchShortcut}
@@ -325,9 +343,11 @@ export function TranscribbleApp() {
             <EmptyState
               onImport={openFilePicker}
               onPrimeSetup={primeWorkspaceSetup}
+              onOpenSettings={openSettings}
               setupReady={setupReady}
               warming={warmingSetup}
               online={effectiveOnline}
+              helperAvailable={helperAvailable}
               supportedFormats={supportedFormats}
             />
           ) : selectedProject ? (
@@ -364,6 +384,7 @@ export function TranscribbleApp() {
                 onExport={openExport}
                 onRetry={() => retryProject(selectedProject.id)}
                 onRemove={() => void removeProject(selectedProject.id)}
+                onOpenSettings={openSettings}
                 setupReady={setupReady}
                 warmingSetup={warmingSetup}
                 online={effectiveOnline}
@@ -395,9 +416,11 @@ export function TranscribbleApp() {
             <EmptyState
               onImport={openFilePicker}
               onPrimeSetup={primeWorkspaceSetup}
+              onOpenSettings={openSettings}
               setupReady={setupReady}
               warming={warmingSetup}
               online={effectiveOnline}
+              helperAvailable={helperAvailable}
               supportedFormats={supportedFormats}
             />
           )}
@@ -480,6 +503,23 @@ export function TranscribbleApp() {
         installPromptAvailable={installState.installPromptAvailable}
         installed={installState.installed}
         onInstall={promptInstall}
+        helperAvailable={helperAvailable}
+        helperSummary={helperSummary}
+        helperUrl={helperCapabilities?.url ?? "http://127.0.0.1:7771"}
+        helperBackendLabel={helperCapabilities?.backendLabel ?? helperCapabilities?.backend}
+        helperCacheLabel={helperCacheLabel}
+        helperModels={helperCapabilities?.models ?? []}
+        helperModelProfile={helperPreferences.modelProfile}
+        helperPhraseHints={helperPreferences.phraseHints}
+        helperSupportsAlignment={helperCapabilities?.supportsAlignment ?? false}
+        helperSupportsDiarization={helperCapabilities?.supportsDiarization ?? false}
+        helperAlignmentEnabled={helperPreferences.enableAlignment}
+        helperDiarizationEnabled={helperPreferences.enableDiarization}
+        onHelperModelProfileChange={updateHelperModelProfile}
+        onHelperPhraseHintsChange={updateHelperPhraseHints}
+        onHelperAlignmentChange={updateHelperAlignment}
+        onHelperDiarizationChange={updateHelperDiarization}
+        onRefreshHelper={() => void refreshHelperCapabilities()}
       />
 
       <CommandPalette
