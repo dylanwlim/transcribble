@@ -1,0 +1,172 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e4]:
+      - generic [ref=e6]:
+        - img [ref=e8]
+        - generic [ref=e13]: Transcribble
+      - generic [ref=e15]:
+        - img
+        - searchbox "Search library" [ref=e16]
+        - generic:
+          - generic: ⌘
+          - generic: K
+      - generic [ref=e17]:
+        - button "Add recording" [ref=e18] [cursor=pointer]:
+          - img [ref=e19]
+          - generic [ref=e22]: Add recording
+          - generic [ref=e23]:
+            - generic [ref=e24]: ⌘
+            - generic [ref=e25]: O
+        - button "Record from microphone" [ref=e26] [cursor=pointer]:
+          - img [ref=e27]
+      - generic [ref=e33]:
+        - generic [ref=e34]: Library
+        - generic [ref=e35]: Add a recording to begin.
+      - generic [ref=e38]:
+        - generic [ref=e39]:
+          - generic [ref=e40]:
+            - img [ref=e41]
+            - generic [ref=e44]: Browser setup needed
+          - generic [ref=e45]: Prepare this browser once, then keep the recording work local.
+          - generic [ref=e46]:
+            - img [ref=e47]
+            - generic [ref=e49]: 1.5 MB used · 3.7 GB available
+          - generic [ref=e50]:
+            - img [ref=e51]
+            - generic [ref=e53]: Browser may clear saved files if storage gets tight.
+        - button "Open workspace settings" [ref=e54] [cursor=pointer]:
+          - generic [ref=e55]: Workspace
+    - main [ref=e57]:
+      - generic [ref=e59]:
+        - img [ref=e61]
+        - heading "Your local voice workspace" [level=1] [ref=e67]
+        - paragraph [ref=e68]: Bring in a recording and turn it into a local transcript you can search, edit, and export on this device. Smaller jobs can stay in the browser. Long or large media routes through the local accelerator on this machine.
+        - generic [ref=e69]:
+          - button "Add recording" [ref=e70] [cursor=pointer]:
+            - img [ref=e71]
+            - text: Add recording
+            - generic [ref=e74]:
+              - generic [ref=e75]: ⌘
+              - generic [ref=e76]: O
+          - button "Prepare browser" [ref=e77] [cursor=pointer]:
+            - img [ref=e78]
+            - text: Prepare browser
+          - button "Check local accelerator" [ref=e81] [cursor=pointer]
+        - generic [ref=e82]:
+          - generic [ref=e83]: Drop files anywhere
+          - generic [ref=e84]:
+            - img [ref=e85]
+            - generic [ref=e88]: Stays on this device
+          - generic [ref=e89]: Long recordings need the local accelerator
+        - 'generic "Supported formats: MP3, MP4, M4A, WAV, MOV, OGG, WEBM, FLAC, AAC" [ref=e90]': Supports MP3, MP4, M4A, WAV, and more.
+    - dialog "Workspace settings" [ref=e92]:
+      - button "Close settings" [ref=e93] [cursor=pointer]
+      - generic [ref=e94]:
+        - paragraph [ref=e95]: Manage local tools, storage, appearance, and shortcuts for this local workspace.
+        - generic [ref=e96]:
+          - generic [ref=e97]:
+            - generic [ref=e98]: Workspace
+            - generic [ref=e99]: Workspace settings
+          - button "Close settings" [active] [ref=e100] [cursor=pointer]:
+            - img [ref=e101]
+        - generic [ref=e104]:
+          - generic [ref=e105]:
+            - heading "Browser tools" [level=3] [ref=e106]
+            - generic [ref=e107]:
+              - generic [ref=e108]:
+                - generic [ref=e109]:
+                  - generic [ref=e111]: Transcription model
+                  - generic [ref=e112]: Not downloaded yet
+                - button "Download" [ref=e113] [cursor=pointer]
+              - generic [ref=e114]:
+                - generic [ref=e115]:
+                  - generic [ref=e117]: Video runtime
+                  - generic [ref=e118]: Not downloaded yet
+                - button "Download" [ref=e119] [cursor=pointer]
+              - generic [ref=e120]:
+                - generic [ref=e121]:
+                  - generic [ref=e122]:
+                    - img [ref=e123]
+                    - generic [ref=e125]: Browser connection
+                  - generic [ref=e126]: Online
+                - generic [ref=e127]:
+                  - img [ref=e128]
+                  - text: Online
+              - button "Reset setup status" [ref=e133] [cursor=pointer]:
+                - img [ref=e134]
+                - text: Reset setup status
+          - generic [ref=e137]:
+            - heading "Storage" [level=3] [ref=e138]
+            - generic [ref=e139]:
+              - generic [ref=e141]:
+                - generic [ref=e143]: Local storage
+                - generic [ref=e144]: 1.5 MB used · 3.7 GB available
+              - generic [ref=e145]:
+                - generic [ref=e146]:
+                  - generic [ref=e148]: Persistent storage
+                  - generic [ref=e149]: Browser may clear data under storage pressure
+                - button "Ask browser" [ref=e150] [cursor=pointer]:
+                  - img [ref=e151]
+                  - text: Ask browser
+          - generic [ref=e153]:
+            - heading "Local accelerator" [level=3] [ref=e154]
+            - generic [ref=e155]:
+              - generic [ref=e156]:
+                - generic [ref=e157]:
+                  - generic [ref=e159]: Transcribble Helper
+                  - generic [ref=e160]: Could not reach the Transcribble Helper on localhost.
+                - button "Refresh" [ref=e161] [cursor=pointer]
+              - generic [ref=e163]:
+                - generic [ref=e165]: Local endpoint
+                - generic [ref=e166]: http://127.0.0.1:7771
+              - generic [ref=e168]:
+                - generic [ref=e170]: Backend and cache
+                - generic [ref=e171]: Waiting for helper · Model cache size unavailable
+              - group [ref=e172]:
+                - generic "Install the helper Run npm run helper:check in this repo to diagnose whether ffmpeg, ffprobe, the helper virtualenv, or the localhost service is missing. If the helper is not installed yet, run npm run helper:install, then npm run helper:start, then npm run helper:check again. If the browser asks whether this site can reach localhost, allow it and refresh." [ref=e173] [cursor=pointer]:
+                  - generic [ref=e174]:
+                    - generic [ref=e175]: Install the helper
+                    - generic [ref=e176]: Run npm run helper:check in this repo to diagnose whether ffmpeg, ffprobe, the helper virtualenv, or the localhost service is missing. If the helper is not installed yet, run npm run helper:install, then npm run helper:start, then npm run helper:check again. If the browser asks whether this site can reach localhost, allow it and refresh.
+                  - img [ref=e177]
+                - generic [ref=e180]:
+                  - generic [ref=e181]:
+                    - generic [ref=e182]: Diagnose this machine first
+                    - code [ref=e183]: npm run helper:check
+                  - generic [ref=e184]:
+                    - generic [ref=e185]: Install Python dependencies
+                    - code [ref=e186]: npm run helper:install
+                  - generic [ref=e187]:
+                    - generic [ref=e188]: Start the localhost helper
+                    - code [ref=e189]: npm run helper:start
+                  - generic [ref=e190]:
+                    - generic [ref=e191]: Re-check localhost health and capabilities
+                    - code [ref=e192]: npm run helper:check
+              - group [ref=e193]:
+                - generic "Advanced helper options Helper tuning appears here once the localhost service is available." [ref=e194] [cursor=pointer]:
+                  - generic [ref=e195]:
+                    - generic [ref=e196]: Advanced helper options
+                    - generic [ref=e197]: Helper tuning appears here once the localhost service is available.
+                  - img [ref=e198]
+                - option "Fast mode" [selected]
+                - option "Accuracy mode"
+          - generic [ref=e200]:
+            - heading "Appearance" [level=3] [ref=e201]
+            - generic [ref=e203]:
+              - generic [ref=e204]:
+                - generic [ref=e206]: Theme
+                - generic [ref=e207]: System, light, or dark
+              - radiogroup "Appearance" [ref=e208]:
+                - radio "System" [checked] [ref=e209] [cursor=pointer]:
+                  - img [ref=e210]
+                - radio "Light" [ref=e212] [cursor=pointer]:
+                  - img [ref=e213]
+                - radio "Dark" [ref=e219] [cursor=pointer]:
+                  - img [ref=e220]
+          - group [ref=e222]:
+            - generic "Keyboard shortcuts Shortcuts stay available while setup finishes." [ref=e223] [cursor=pointer]:
+              - generic [ref=e224]:
+                - generic [ref=e225]: Keyboard shortcuts
+                - generic [ref=e226]: Shortcuts stay available while setup finishes.
+              - img [ref=e227]
+          - generic [ref=e229]: Browser mode keeps recordings on this device for shorter jobs. The local accelerator also runs on this machine and is the default path for long or memory-heavy recordings.
+  - alert [ref=e91]

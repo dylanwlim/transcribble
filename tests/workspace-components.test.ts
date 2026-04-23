@@ -47,11 +47,11 @@ test("sidebar renders setup as a real button with the shared settings label", ()
     }),
   );
 
-  assert.match(html, /<button[^>]*aria-label="Open setup and settings"/);
-  assert.match(html, />Setup</);
+  assert.match(html, /<button[^>]*aria-label="Open workspace settings"/);
+  assert.match(html, />Workspace</);
   assert.match(html, /202 MB used/);
   assert.match(html, /2\.0 GB available/);
-  assert.match(html, /Browser tools ready/);
+  assert.match(html, /Helper not connected/);
 });
 
 test("settings sheet renders the local workspace dialog heading", () => {

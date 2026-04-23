@@ -1,6 +1,16 @@
 "use client";
 
-import { Check, Download, Loader2, RotateCcw, Shield, Wifi, WifiOff, X } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  Download,
+  Loader2,
+  RotateCcw,
+  Shield,
+  Wifi,
+  WifiOff,
+  X,
+} from "lucide-react";
 import React, { useEffect, useId, useRef } from "react";
 
 import {
@@ -168,6 +178,7 @@ export function SettingsSheet({
   }
 
   const storageSummary = buildStorageStatus(storageUsed, storageAvailable);
+  const browserToolsReady = modelReady && mediaReady;
   const persistentStorageDetail =
     storagePersisted === true
       ? "Browser granted persistent local storage"
@@ -221,7 +232,7 @@ export function SettingsSheet({
         </div>
 
         <div className="scroll-y flex-1 px-4 py-4 sm:px-5">
-          <Block title="Local tools">
+          <Block title="Browser tools">
             <Row
               label="Transcription model"
               detail={
@@ -338,13 +349,15 @@ export function SettingsSheet({
             />
 
             {!helperAvailable ? (
-              <div className="rounded-xl border border-border/80 bg-surface/70 px-3 py-3">
-                <div className="text-[13px] font-medium text-foreground">Install, start, and check</div>
-                <div className="mt-0.5 text-[11px] leading-5 text-muted-foreground">
-                  {helperNextAction ??
-                    "Run the helper check command first so it can tell you exactly whether ffmpeg, ffprobe, the helper virtualenv, or the localhost service is missing."}
-                </div>
-                <div className="mt-3 space-y-2 text-[11px] leading-5 text-muted-foreground">
+              <DisclosureCard
+                title="Install the helper"
+                detail={
+                  helperNextAction ??
+                  "Run the helper check command first so it can tell you exactly whether ffmpeg, ffprobe, the helper virtualenv, or the localhost service is missing."
+                }
+                defaultOpen
+              >
+                <div className="space-y-2 text-[11px] leading-5 text-muted-foreground">
                   <CommandStep
                     label="Diagnose this machine first"
                     command={LOCAL_ACCELERATOR_CHECK_COMMAND}
@@ -362,93 +375,104 @@ export function SettingsSheet({
                     command={LOCAL_ACCELERATOR_CHECK_COMMAND}
                   />
                 </div>
-              </div>
+              </DisclosureCard>
             ) : null}
 
-            <div className="rounded-xl border border-border/80 bg-surface/70 px-3 py-3">
-              <label className="block text-[13px] font-medium text-foreground" htmlFor={`${titleId}-helper-model`}>
-                Model profile
-              </label>
-              <select
-                id={`${titleId}-helper-model`}
-                value={helperModelProfile}
-                onChange={(event) => onHelperModelProfileChange(event.target.value as HelperModelProfile)}
-                className="mt-2 h-10 w-full rounded-lg border border-border bg-background px-3 text-[12px] text-foreground ring-focus"
-              >
-                <option value="fast">Fast mode</option>
-                <option value="accurate">Accuracy mode</option>
-              </select>
-              {helperModels.length > 0 ? (
-                <div className="mt-3 space-y-2 text-[11px] leading-5 text-muted-foreground">
-                  {helperModels.map((model) => (
-                    <div key={model.profile} className="rounded-lg border border-border/70 bg-background/60 px-3 py-2">
-                      <div className="font-medium text-foreground">
-                        {model.label}
-                        {model.recommended ? " · Recommended" : ""}
-                      </div>
-                      <div className="mt-0.5">
-                        {model.modelName}
-                        {typeof model.diskUsageBytes === "number"
-                          ? ` · ${(model.diskUsageBytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
-                          : ""}
-                        {model.downloaded ? " · Cached locally" : " · Downloads on first use"}
-                      </div>
+            <DisclosureCard
+              title="Advanced helper options"
+              detail={
+                helperAvailable
+                  ? "Tune the local accelerator, phrase dictionary, and optional slower passes."
+                  : "Helper tuning appears here once the localhost service is available."
+              }
+            >
+              <div className="space-y-3">
+                <div className="rounded-xl border border-border/80 bg-surface/70 px-3 py-3">
+                  <label className="block text-[13px] font-medium text-foreground" htmlFor={`${titleId}-helper-model`}>
+                    Model profile
+                  </label>
+                  <select
+                    id={`${titleId}-helper-model`}
+                    value={helperModelProfile}
+                    onChange={(event) => onHelperModelProfileChange(event.target.value as HelperModelProfile)}
+                    className="mt-2 h-10 w-full rounded-lg border border-border bg-background px-3 text-[12px] text-foreground ring-focus"
+                  >
+                    <option value="fast">Fast mode</option>
+                    <option value="accurate">Accuracy mode</option>
+                  </select>
+                  {helperModels.length > 0 ? (
+                    <div className="mt-3 space-y-2 text-[11px] leading-5 text-muted-foreground">
+                      {helperModels.map((model) => (
+                        <div key={model.profile} className="rounded-lg border border-border/70 bg-background/60 px-3 py-2">
+                          <div className="font-medium text-foreground">
+                            {model.label}
+                            {model.recommended ? " · Recommended" : ""}
+                          </div>
+                          <div className="mt-0.5">
+                            {model.modelName}
+                            {typeof model.diskUsageBytes === "number"
+                              ? ` · ${(model.diskUsageBytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
+                              : ""}
+                            {model.downloaded ? " · Cached locally" : " · Downloads on first use"}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
 
-            <div className="rounded-xl border border-border/80 bg-surface/70 px-3 py-3">
-              <label className="block text-[13px] font-medium text-foreground" htmlFor={`${titleId}-helper-hints`}>
-                Phrase dictionary
-              </label>
-              <p className="mt-0.5 text-[11px] leading-5 text-muted-foreground">
-                Names, acronyms, and domain terms to bias the local accelerator.
-              </p>
-              <textarea
-                id={`${titleId}-helper-hints`}
-                value={helperPhraseHints}
-                onChange={(event) => onHelperPhraseHintsChange(event.target.value)}
-                rows={4}
-                placeholder="Acme Ops&#10;RFP&#10;Maya Patel"
-                className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-[12px] text-foreground ring-focus"
-              />
-            </div>
+                <div className="rounded-xl border border-border/80 bg-surface/70 px-3 py-3">
+                  <label className="block text-[13px] font-medium text-foreground" htmlFor={`${titleId}-helper-hints`}>
+                    Phrase dictionary
+                  </label>
+                  <p className="mt-0.5 text-[11px] leading-5 text-muted-foreground">
+                    Names, acronyms, and domain terms to bias the local accelerator.
+                  </p>
+                  <textarea
+                    id={`${titleId}-helper-hints`}
+                    value={helperPhraseHints}
+                    onChange={(event) => onHelperPhraseHintsChange(event.target.value)}
+                    rows={4}
+                    placeholder="Acme Ops&#10;RFP&#10;Maya Patel"
+                    className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-[12px] text-foreground ring-focus"
+                  />
+                </div>
 
-            <div className="grid gap-2 sm:grid-cols-2">
-              <label className="flex items-start gap-3 rounded-xl border border-border/80 bg-surface/70 px-3 py-3 text-[12px]">
-                <input
-                  type="checkbox"
-                  checked={helperAlignmentEnabled}
-                  disabled={!helperSupportsAlignment}
-                  onChange={(event) => onHelperAlignmentChange(event.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-border"
-                />
-                <span>
-                  <span className="block font-medium text-foreground">Optional alignment</span>
-                  <span className="mt-0.5 block text-muted-foreground">
-                    {helperSupportsAlignment ? "Add a slower second pass when supported." : "Unavailable in the current helper build."}
-                  </span>
-                </span>
-              </label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <label className="flex items-start gap-3 rounded-xl border border-border/80 bg-surface/70 px-3 py-3 text-[12px]">
+                    <input
+                      type="checkbox"
+                      checked={helperAlignmentEnabled}
+                      disabled={!helperSupportsAlignment}
+                      onChange={(event) => onHelperAlignmentChange(event.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-border"
+                    />
+                    <span>
+                      <span className="block font-medium text-foreground">Optional alignment</span>
+                      <span className="mt-0.5 block text-muted-foreground">
+                        {helperSupportsAlignment ? "Add a slower second pass when supported." : "Unavailable in the current helper build."}
+                      </span>
+                    </span>
+                  </label>
 
-              <label className="flex items-start gap-3 rounded-xl border border-border/80 bg-surface/70 px-3 py-3 text-[12px]">
-                <input
-                  type="checkbox"
-                  checked={helperDiarizationEnabled}
-                  disabled={!helperSupportsDiarization}
-                  onChange={(event) => onHelperDiarizationChange(event.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-border"
-                />
-                <span>
-                  <span className="block font-medium text-foreground">Optional diarization</span>
-                  <span className="mt-0.5 block text-muted-foreground">
-                    {helperSupportsDiarization ? "Try local speaker labeling when the machine can handle it." : "Unavailable in the current helper build."}
-                  </span>
-                </span>
-              </label>
-            </div>
+                  <label className="flex items-start gap-3 rounded-xl border border-border/80 bg-surface/70 px-3 py-3 text-[12px]">
+                    <input
+                      type="checkbox"
+                      checked={helperDiarizationEnabled}
+                      disabled={!helperSupportsDiarization}
+                      onChange={(event) => onHelperDiarizationChange(event.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-border"
+                    />
+                    <span>
+                      <span className="block font-medium text-foreground">Optional diarization</span>
+                      <span className="mt-0.5 block text-muted-foreground">
+                        {helperSupportsDiarization ? "Try local speaker labeling when the machine can handle it." : "Unavailable in the current helper build."}
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </DisclosureCard>
           </Block>
 
           {installPromptAvailable || installed ? (
@@ -474,17 +498,22 @@ export function SettingsSheet({
             </Row>
           </Block>
 
-          <Block title="Shortcuts">
-            <ShortcutRow label="Play / pause" shortcutId="play-pause" />
-            <ShortcutRow label="Previous / next segment" shortcutId="prev-next-segment" />
-            <ShortcutRow label="Toggle bookmark" shortcutId="toggle-bookmark" />
-            <ShortcutRow label="Search library" shortcutId="search-library" />
-            <ShortcutRow label="Find in transcript" shortcutId="search-transcript" />
-            <ShortcutRow label={IMPORT_FILE_LABEL} shortcutId="add-recording" />
-            <ShortcutRow label="Export" shortcutId="export" />
-            <ShortcutRow label="Toggle inspector" shortcutId="toggle-inspector" />
-            <ShortcutRow label="Settings" shortcutId="settings" />
-          </Block>
+          <DisclosureCard
+            title="Keyboard shortcuts"
+            detail={browserToolsReady ? "Keep the frequent actions close without keeping them on screen." : "Shortcuts stay available while setup finishes."}
+          >
+            <div className="space-y-2">
+              <ShortcutRow label="Play / pause" shortcutId="play-pause" />
+              <ShortcutRow label="Previous / next segment" shortcutId="prev-next-segment" />
+              <ShortcutRow label="Toggle bookmark" shortcutId="toggle-bookmark" />
+              <ShortcutRow label="Search library" shortcutId="search-library" />
+              <ShortcutRow label="Find in transcript" shortcutId="search-transcript" />
+              <ShortcutRow label={IMPORT_FILE_LABEL} shortcutId="add-recording" />
+              <ShortcutRow label="Export" shortcutId="export" />
+              <ShortcutRow label="Toggle inspector" shortcutId="toggle-inspector" />
+              <ShortcutRow label="Settings" shortcutId="settings" />
+            </div>
+          </DisclosureCard>
 
           <div className="rounded-xl bg-muted/40 px-3 py-3 text-[11px] leading-5 text-muted-foreground">
             {SETTINGS_PRIVACY_COPY}
@@ -588,5 +617,33 @@ function ShortcutRow({
       <span className="text-muted-foreground">{label}</span>
       <KeyboardShortcut shortcutId={shortcutId} />
     </div>
+  );
+}
+
+function DisclosureCard({
+  title,
+  detail,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  detail?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details
+      open={defaultOpen}
+      className="group mb-6 rounded-2xl border border-border/80 bg-surface/70 [&_summary::-webkit-details-marker]:hidden"
+    >
+      <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-3 py-3">
+        <div className="min-w-0">
+          <div className="text-[13px] font-medium text-foreground">{title}</div>
+          {detail ? <div className="mt-0.5 text-[11px] leading-5 text-muted-foreground">{detail}</div> : null}
+        </div>
+        <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-subtle transition-transform duration-150 group-open:rotate-90" />
+      </summary>
+      <div className="border-t border-border/80 px-3 py-3">{children}</div>
+    </details>
   );
 }

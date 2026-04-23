@@ -239,19 +239,6 @@
     min-width: 0;
   }
 
-  .workspace-empty-format-list {
-    display: inline-flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 0.25rem 0.5rem;
-    max-width: min(100%, 32rem);
-  }
-
-  .workspace-empty-format-token,
-  .workspace-empty-format-separator {
-    white-space: nowrap;
-  }
-
   @container (max-width: 40rem) {
     .workspace-empty-actions {
       width: 100%;

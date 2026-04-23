@@ -40,12 +40,12 @@ export const LOCAL_ACCELERATOR_CHECK_COMMAND = "npm run helper:check";
 export const ADD_RECORDING_LABEL = "Add recording";
 export const ADD_RECORDING_HELPER = "Add a recording to begin.";
 export const IMPORT_FILE_LABEL = "Import file";
-export const SETTINGS_SIDEBAR_LABEL = "Setup";
-export const SETTINGS_OPEN_LABEL = "Open setup and settings";
-export const SETTINGS_SECTION_LABEL = "Settings";
-export const SETTINGS_MODAL_TITLE = "Local workspace";
+export const SETTINGS_SIDEBAR_LABEL = "Workspace";
+export const SETTINGS_OPEN_LABEL = "Open workspace settings";
+export const SETTINGS_SECTION_LABEL = "Workspace";
+export const SETTINGS_MODAL_TITLE = "Workspace settings";
 export const EMPTY_STATE_COPY =
-  "Bring in audio or other supported FFmpeg-decodable media. Browser mode stays convenient for smaller, safer recordings. The local accelerator is the default path for long or large media and keeps the work on this machine.";
+  "Bring in a recording and turn it into a local transcript you can search, edit, and export on this device. Smaller jobs can stay in the browser. Long or large media routes through the local accelerator on this machine.";
 export const SETTINGS_PRIVACY_COPY =
   "Browser mode keeps recordings on this device for shorter jobs. The local accelerator also runs on this machine and is the default path for long or memory-heavy recordings.";
 export const UNSUPPORTED_FILE_TYPE_MESSAGE = `Unsupported file type. Use ${formatList(

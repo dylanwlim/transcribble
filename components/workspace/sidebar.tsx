@@ -476,15 +476,23 @@ export function Sidebar({
   const storageSummary = buildStorageStatus(storageUsedBytes, storageAvailableBytes);
   const browserToolsReady = modelReady && mediaReady;
   const allReady = browserToolsReady && helperAvailable;
-  const setupStatusTitle = allReady
+  const workspaceStatusTitle = allReady
     ? online
-      ? "All local tools ready"
-      : "All local tools ready offline"
+      ? "Workspace ready"
+      : "Workspace ready offline"
     : browserToolsReady
-      ? "Browser tools ready"
+      ? "Helper not connected"
       : online
-        ? "One-time setup needed"
-        : "Go online once for setup";
+        ? "Browser setup needed"
+        : "Needs one online pass";
+  const workspaceStatusSummary = allReady
+    ? "Browser tools and the local accelerator are ready."
+    : browserToolsReady
+      ? helperSummary
+      : online
+        ? "Prepare this browser once, then keep the recording work local."
+        : "Go online once so this browser can cache its local tools.";
+  const storageLine = [storageSummary.usedLabel, storageSummary.availableLabel].filter(Boolean).join(" · ");
 
   return (
     <aside className={cn("flex h-full min-h-0 w-full flex-col border-r border-border bg-surface", className)}>
@@ -541,8 +549,8 @@ export function Sidebar({
           type="button"
           onClick={onImport}
           className={cn(
-            "group flex min-h-10 flex-1 items-center gap-2 rounded-xl px-3 py-2 text-left text-[13px] font-medium",
-            "text-foreground hover:bg-muted/60 transition-colors duration-150 ring-focus",
+            "group flex min-h-10 flex-1 items-center gap-2 rounded-xl border border-border/70 bg-muted/40 px-3 py-2 text-left text-[13px] font-medium",
+            "text-foreground transition-colors duration-150 hover:bg-muted ring-focus",
           )}
         >
           <Upload className="h-3.5 w-3.5 text-subtle group-hover:text-foreground" />
@@ -555,10 +563,10 @@ export function Sidebar({
           aria-label={isRecording ? "Stop recording" : "Record from microphone"}
           title={isRecording ? "Stop recording" : "Record from microphone"}
           className={cn(
-            "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors duration-150 ring-focus",
+            "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-surface transition-colors duration-150 ring-focus",
             isRecording
               ? "bg-record text-background animate-pulse-record"
-              : "text-subtle hover:bg-muted/60 hover:text-foreground",
+              : "text-subtle hover:bg-muted hover:text-foreground",
           )}
         >
           {isRecording ? <Square className="h-3.5 w-3.5 fill-current" /> : <Mic className="h-3.5 w-3.5" />}
@@ -659,50 +667,42 @@ export function Sidebar({
       </div>
 
       <div className="border-t border-border px-[var(--workspace-footer-padding)] pb-[max(var(--workspace-footer-padding),env(safe-area-inset-bottom))] pt-3">
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 text-[11px]">
-          <div className="min-w-0">
-            <div className="flex items-start gap-2">
-              <HardDrive className="mt-0.5 h-3.5 w-3.5 shrink-0 text-subtle" />
-              <div className="min-w-0">
-                <div className="truncate font-medium text-muted-foreground tabular">
-                  {storageSummary.usedLabel}
-                </div>
-                {storageSummary.availableLabel ? (
-                  <div className="mt-0.5 truncate text-[10px] leading-4 text-muted-foreground tabular">
-                    {storageSummary.availableLabel}
-                  </div>
-                ) : null}
-                {storagePersisted === false ? (
-                  <div className="mt-1 flex items-start gap-1.5 text-[10px] leading-4 text-muted-foreground">
-                    <AlertTriangle className="mt-0.5 h-2.5 w-2.5 shrink-0 text-warning" />
-                    <span className="min-w-0 text-balance">
-                      Browser may clear files if storage gets tight
-                    </span>
-                  </div>
-                ) : null}
+        <div className="rounded-2xl border border-border/80 bg-surface/80 px-3 py-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-subtle">
+                {allReady ? <Check className="h-3 w-3 text-success" /> : <CircleDot className="h-3 w-3 text-warning" />}
+                <span>{workspaceStatusTitle}</span>
               </div>
+              <div className="mt-1 text-[12px] leading-5 text-foreground/90">
+                {workspaceStatusSummary}
+              </div>
+              <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground tabular">
+                <HardDrive className="h-3.5 w-3.5 shrink-0 text-subtle" />
+                <span className="min-w-0 truncate">{storageLine}</span>
+              </div>
+              {storagePersisted === false ? (
+                <div className="mt-1.5 flex items-start gap-1.5 text-[10px] leading-4 text-muted-foreground">
+                  <AlertTriangle className="mt-0.5 h-2.5 w-2.5 shrink-0 text-warning" />
+                  <span className="min-w-0">Browser may clear saved files if storage gets tight.</span>
+                </div>
+              ) : null}
             </div>
+
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              aria-label={SETTINGS_OPEN_LABEL}
+              title={SETTINGS_OPEN_LABEL}
+              className={cn(
+                "inline-flex min-h-9 items-center gap-1.5 self-start whitespace-nowrap rounded-full border border-border-strong px-3 text-[10px] font-medium uppercase tracking-[0.16em] ring-focus",
+                "transition-colors duration-150 hover:bg-muted/70",
+                allReady ? "text-success hover:text-success" : "text-warning hover:text-warning",
+              )}
+            >
+              <span>{SETTINGS_SIDEBAR_LABEL}</span>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            aria-label={SETTINGS_OPEN_LABEL}
-            title={SETTINGS_OPEN_LABEL}
-            className={cn(
-              "inline-flex min-h-9 items-center gap-1.5 self-start whitespace-nowrap rounded-full border border-border-strong px-3 text-[10px] font-medium uppercase tracking-[0.16em] ring-focus",
-              "transition-colors duration-150 hover:bg-muted/70",
-              allReady ? "text-success hover:text-success" : "text-warning hover:text-warning",
-            )}
-          >
-            {allReady ? <Check className="h-3 w-3" /> : <CircleDot className="h-3 w-3" />}
-            <span>{SETTINGS_SIDEBAR_LABEL}</span>
-          </button>
-        </div>
-        <div className="mt-2 text-[10px] uppercase tracking-[0.16em] text-subtle">
-          {setupStatusTitle}
-        </div>
-        <div className="mt-1 text-[10px] leading-4 text-muted-foreground">
-          {helperAvailable ? "Local accelerator ready." : helperSummary}
         </div>
       </div>
     </aside>

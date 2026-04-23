@@ -31,6 +31,11 @@ export function EmptyState({
   helperAvailable,
   supportedFormats,
 }: EmptyStateProps) {
+  const supportedFormatsSummary =
+    supportedFormats.length > 4
+      ? `${supportedFormats.slice(0, 4).join(", ")}, and more`
+      : supportedFormats.join(", ");
+
   return (
     <div className="workspace-empty-shell grid min-h-0 w-full flex-1 place-items-center px-[var(--workspace-mobile-padding)] py-10 sm:py-12 lg:px-10">
       <div className="workspace-empty-hero mx-auto flex w-full max-w-[var(--workspace-hero-max-width)] flex-col items-center text-center">
@@ -75,13 +80,13 @@ export function EmptyState({
               onClick={() => void onPrimeSetup()}
               disabled={warming || !online}
               className={cn(
-                "inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-border bg-surface px-5 py-2 text-[13px] font-medium text-foreground",
-                "whitespace-nowrap",
-                "transition-colors duration-150 hover:bg-muted disabled:opacity-50 ring-focus",
-              )}
-            >
-              <ShieldCheck className="h-3.5 w-3.5" />
-              {warming ? "Getting ready…" : online ? "Get this browser ready" : "Go online once"}
+              "inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-border bg-surface px-5 py-2 text-[13px] font-medium text-foreground",
+              "whitespace-nowrap",
+              "transition-colors duration-150 hover:bg-muted disabled:opacity-50 ring-focus",
+            )}
+          >
+            <ShieldCheck className="h-3.5 w-3.5" />
+              {warming ? "Getting ready…" : online ? "Prepare browser" : "Go online once"}
             </button>
           ) : null}
 
@@ -93,33 +98,28 @@ export function EmptyState({
               "whitespace-nowrap transition-colors duration-150 hover:bg-muted ring-focus",
             )}
           >
-            {helperAvailable ? "Local accelerator ready" : "Local accelerator setup"}
+            {helperAvailable ? "Local accelerator ready" : "Check local accelerator"}
           </button>
         </div>
 
-        <div className="workspace-empty-meta mt-7 gap-x-5 gap-y-3 text-[11px] leading-5 text-muted-foreground sm:text-[12px]">
+        <div className="workspace-empty-meta mt-7 gap-x-4 gap-y-2 text-[11px] leading-5 text-muted-foreground sm:text-[12px]">
           <div className="workspace-empty-meta-group">Drop files anywhere</div>
-          <div className="workspace-empty-meta-group">
-            <div className="workspace-empty-format-list" aria-label={`Supported formats: ${supportedFormats.join(", ")}`}>
-              {supportedFormats.map((format) => (
-                <span
-                  key={format}
-                  className="workspace-empty-format-token rounded-full border border-border bg-surface px-2.5 py-1"
-                >
-                  {format}
-                </span>
-              ))}
-            </div>
-          </div>
           <div className="workspace-empty-meta-group inline-flex items-center justify-center gap-2">
             <ShieldCheck className="h-3.5 w-3.5 text-subtle" aria-hidden />
             <span>Stays on this device</span>
           </div>
           <div className="workspace-empty-meta-group">
             {helperAvailable
-              ? "Long recordings route to the local accelerator"
+              ? "Long recordings use the local accelerator"
               : "Long recordings need the local accelerator"}
           </div>
+        </div>
+
+        <div
+          className="mt-3 text-[11px] leading-5 text-muted-foreground sm:text-[12px]"
+          aria-label={`Supported formats: ${supportedFormats.join(", ")}`}
+        >
+          Supports {supportedFormatsSummary}.
         </div>
       </div>
     </div>

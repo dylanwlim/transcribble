@@ -154,6 +154,7 @@ export function Stage(props: StageProps) {
   const isPaused = project.status === "paused";
   const isReady = project.status === "ready";
   const isHelperRoute = project.backend === "local-helper";
+  const showHelperRouteBanner = isHelperRoute && !isPaused && !isError;
   const needsLocalHelper = project.step === "needs-local-helper";
   const bookmarkActive = marks.some(
     (mark) => mark.kind === "bookmark" && mark.segmentId === focusedSegmentId,
@@ -251,7 +252,7 @@ export function Stage(props: StageProps) {
         />
       ) : null}
 
-      {isHelperRoute ? (
+      {showHelperRouteBanner ? (
         <div className="mx-6 mt-3 flex items-start gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3 text-[12px] leading-5 text-foreground animate-rise-in">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
           <div className="min-w-0">

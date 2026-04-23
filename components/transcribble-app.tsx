@@ -428,7 +428,7 @@ export function TranscribbleApp() {
             />
           )}
 
-          <SettingsLaunch onOpen={openSettings} />
+          <SettingsLaunch onOpen={openSettings} hidden={emptyState} />
         </main>
 
         {effectiveNotice && !settingsOpen && !exportOpen && !paletteOpen ? (
@@ -642,7 +642,17 @@ function MobileSidebarDrawer({
   );
 }
 
-function SettingsLaunch({ onOpen }: { onOpen: () => void }) {
+function SettingsLaunch({
+  onOpen,
+  hidden = false,
+}: {
+  onOpen: () => void;
+  hidden?: boolean;
+}) {
+  if (hidden) {
+    return null;
+  }
+
   return (
     <button
       type="button"
