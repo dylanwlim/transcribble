@@ -1,11 +1,7 @@
 "use client";
 
 import {
-  AlertTriangle,
-  Check,
-  CircleDot,
   FileAudio,
-  HardDrive,
   Mic,
   MoreHorizontal,
   MonitorUp,
@@ -26,10 +22,7 @@ import { cn } from "@/lib/utils";
 import {
   ADD_RECORDING_HELPER,
   ADD_RECORDING_LABEL,
-  SETTINGS_OPEN_LABEL,
-  SETTINGS_SIDEBAR_LABEL,
 } from "@/lib/transcribble/constants";
-import { buildStorageStatus } from "@/lib/transcribble/storage";
 import { formatDuration } from "@/lib/transcribble/transcript";
 import type {
   LibrarySearchResult,
@@ -52,17 +45,8 @@ interface SidebarProps {
   onTogglePin: (id: string) => void;
   onReorder: (sourceId: string, targetId: string, position: "before" | "after") => void;
   onToggleRecording: () => void | Promise<void>;
-  onOpenSettings: () => void;
   isRecording: boolean;
   librarySearchRef: React.Ref<HTMLInputElement>;
-  storageUsedBytes: number | null;
-  storageAvailableBytes: number | null;
-  storagePersisted: boolean | null;
-  modelReady: boolean;
-  mediaReady: boolean;
-  online: boolean;
-  helperAvailable: boolean;
-  helperSummary: string;
   desktopAppInstalled: boolean;
   desktopInstallAvailable: boolean;
   onOpenDesktopApp: () => void | Promise<void>;
@@ -464,17 +448,8 @@ export function Sidebar({
   onTogglePin,
   onReorder,
   onToggleRecording,
-  onOpenSettings,
   isRecording,
   librarySearchRef,
-  storageUsedBytes,
-  storageAvailableBytes,
-  storagePersisted,
-  modelReady,
-  mediaReady,
-  online,
-  helperAvailable,
-  helperSummary,
   desktopAppInstalled,
   desktopInstallAvailable,
   onOpenDesktopApp,
@@ -502,27 +477,6 @@ export function Sidebar({
     }),
     [projects],
   );
-
-  const storageSummary = buildStorageStatus(storageUsedBytes, storageAvailableBytes);
-  const browserToolsReady = modelReady && mediaReady;
-  const allReady = browserToolsReady && helperAvailable;
-  const workspaceStatusTitle = allReady
-    ? online
-      ? "Workspace ready"
-      : "Workspace ready offline"
-    : browserToolsReady
-      ? "Helper not connected"
-      : online
-        ? "Browser setup needed"
-        : "Needs one online pass";
-  const workspaceStatusSummary = allReady
-    ? "Browser tools and the local accelerator are ready."
-    : browserToolsReady
-      ? helperSummary
-      : online
-        ? "Prepare this browser once, then keep the recording work local."
-        : "Go online once so this browser can cache its local tools.";
-  const storageLine = [storageSummary.usedLabel, storageSummary.availableLabel].filter(Boolean).join(" · ");
 
   const desktopLabel = desktopAppInstalled
     ? "Open app"
@@ -711,45 +665,6 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className="border-t border-border px-[var(--workspace-footer-padding)] pb-[max(var(--workspace-footer-padding),env(safe-area-inset-bottom))] pt-3">
-        <div className="rounded-2xl border border-border/80 bg-surface/80 px-3 py-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-subtle">
-                {allReady ? <Check className="h-3 w-3 text-success" /> : <CircleDot className="h-3 w-3 text-warning" />}
-                <span>{workspaceStatusTitle}</span>
-              </div>
-              <div className="mt-1 text-[12px] leading-5 text-foreground/90">
-                {workspaceStatusSummary}
-              </div>
-              <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground tabular">
-                <HardDrive className="h-3.5 w-3.5 shrink-0 text-subtle" />
-                <span className="min-w-0 truncate">{storageLine}</span>
-              </div>
-              {storagePersisted === false ? (
-                <div className="mt-1.5 flex items-start gap-1.5 text-[10px] leading-4 text-muted-foreground">
-                  <AlertTriangle className="mt-0.5 h-2.5 w-2.5 shrink-0 text-warning" />
-                  <span className="min-w-0">Browser may clear saved files if storage gets tight.</span>
-                </div>
-              ) : null}
-            </div>
-
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              aria-label={SETTINGS_OPEN_LABEL}
-              title={SETTINGS_OPEN_LABEL}
-              className={cn(
-                "inline-flex min-h-9 items-center gap-1.5 self-start whitespace-nowrap rounded-full border border-border-strong px-3 text-[10px] font-medium uppercase tracking-[0.16em] ring-focus",
-                "transition-colors duration-150 hover:bg-muted/70",
-                allReady ? "text-success hover:text-success" : "text-warning hover:text-warning",
-              )}
-            >
-              <span>{SETTINGS_SIDEBAR_LABEL}</span>
-            </button>
-          </div>
-        </div>
-      </div>
     </aside>
   );
 }

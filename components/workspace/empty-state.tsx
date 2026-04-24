@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, MonitorUp, ShieldCheck, Upload } from "lucide-react";
+import { Download, MonitorUp, Upload } from "lucide-react";
 import React from "react";
 
 import {
@@ -12,12 +12,6 @@ import { KeyboardShortcut } from "./keyboard-shortcut";
 
 interface EmptyStateProps {
   onImport: () => void;
-  onPrimeSetup: () => void | Promise<void>;
-  onOpenSettings: () => void;
-  setupReady: boolean;
-  warming: boolean;
-  online: boolean;
-  helperAvailable: boolean;
   desktopAppInstalled: boolean;
   desktopInstallAvailable: boolean;
   onOpenDesktopApp: () => void | Promise<void>;
@@ -26,12 +20,6 @@ interface EmptyStateProps {
 
 export function EmptyState({
   onImport,
-  onPrimeSetup,
-  onOpenSettings,
-  setupReady,
-  warming,
-  online,
-  helperAvailable,
   desktopAppInstalled,
   desktopInstallAvailable,
   onOpenDesktopApp,
@@ -95,46 +83,11 @@ export function EmptyState({
                 ? "Install app"
                 : "Desktop app"}
           </button>
-
-          {!setupReady ? (
-            <button
-              type="button"
-              onClick={() => void onPrimeSetup()}
-              disabled={warming || !online}
-              className={cn(
-              "inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-border bg-surface px-5 py-2 text-[13px] font-medium text-foreground",
-              "whitespace-nowrap",
-              "transition-colors duration-150 hover:bg-muted disabled:opacity-50 ring-focus",
-            )}
-          >
-            <ShieldCheck className="h-3.5 w-3.5" />
-              {warming ? "Getting ready…" : online ? "Prepare browser" : "Go online once"}
-            </button>
-          ) : null}
-
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            className={cn(
-              "inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-border bg-surface px-5 py-2 text-[13px] font-medium text-foreground",
-              "whitespace-nowrap transition-colors duration-150 hover:bg-muted ring-focus",
-            )}
-          >
-            {helperAvailable ? "Local accelerator ready" : "Check local accelerator"}
-          </button>
         </div>
 
         <div className="workspace-empty-meta mt-7 gap-x-4 gap-y-2 text-[11px] leading-5 text-muted-foreground sm:text-[12px]">
           <div className="workspace-empty-meta-group">Drop files anywhere</div>
-          <div className="workspace-empty-meta-group inline-flex items-center justify-center gap-2">
-            <ShieldCheck className="h-3.5 w-3.5 text-subtle" aria-hidden />
-            <span>Stays on this device</span>
-          </div>
-          <div className="workspace-empty-meta-group">
-            {helperAvailable
-              ? "Long recordings chunk locally"
-              : "Long recordings need the local accelerator"}
-          </div>
+          <div className="workspace-empty-meta-group">Stays on this device</div>
         </div>
 
         <div

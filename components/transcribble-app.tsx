@@ -129,9 +129,7 @@ export function TranscribbleApp() {
     ? getProjectViewState(selectedProject)
     : null;
 
-  const setupReady = assetSetup.modelReady && assetSetup.mediaReady;
   const effectiveOnline = workspaceReady ? assetSetup.online : true;
-  const warmingSetup = assetSetup.warmingModel || assetSetup.warmingMedia;
   const helperAvailable = helperCapabilities?.available ?? false;
   const helperSummary = helperAvailable
     ? "Reachable on localhost. Large and long recordings route here by default."
@@ -143,15 +141,6 @@ export function TranscribbleApp() {
     typeof helperCapabilities?.cacheBytes === "number"
       ? `${formatBytes(helperCapabilities.cacheBytes)} cached locally`
       : "Model cache size unavailable";
-
-  const primeWorkspaceSetup = useCallback(async () => {
-    if (!assetSetup.modelReady) {
-      await primeTranscriptionModel();
-    }
-    if (!assetSetup.mediaReady) {
-      await primeMediaRuntime();
-    }
-  }, [assetSetup.mediaReady, assetSetup.modelReady, primeMediaRuntime, primeTranscriptionModel]);
 
   const openExport = useCallback(() => {
     if (!selectedProjectView?.canExport) return;
@@ -320,20 +309,8 @@ export function TranscribbleApp() {
           void toggleRecording();
           finishAction();
         }}
-        onOpenSettings={() => {
-          openSettings();
-          finishAction();
-        }}
         isRecording={isRecording}
         librarySearchRef={librarySearchRef}
-        storageUsedBytes={storageState?.usage ?? null}
-        storageAvailableBytes={storageState?.available ?? null}
-        storagePersisted={storageState?.persisted ?? null}
-        modelReady={assetSetup.modelReady}
-        mediaReady={assetSetup.mediaReady}
-        online={effectiveOnline}
-        helperAvailable={helperAvailable}
-        helperSummary={helperSummary}
         desktopAppInstalled={installState.installed}
         desktopInstallAvailable={installState.installPromptAvailable}
         onOpenDesktopApp={() => void openDesktopApp()}
@@ -376,12 +353,6 @@ export function TranscribbleApp() {
           {emptyState ? (
             <EmptyState
               onImport={openFilePicker}
-              onPrimeSetup={primeWorkspaceSetup}
-              onOpenSettings={openSettings}
-              setupReady={setupReady}
-              warming={warmingSetup}
-              online={effectiveOnline}
-              helperAvailable={helperAvailable}
               desktopAppInstalled={installState.installed}
               desktopInstallAvailable={installState.installPromptAvailable}
               onOpenDesktopApp={openDesktopApp}
@@ -419,13 +390,10 @@ export function TranscribbleApp() {
                 onCopy={onCopyTranscript}
                 copied={copied}
                 onExport={openExport}
+                onDownloadTxt={() => onDownloadTranscript("txt")}
                 onRetry={() => retryProject(selectedProject.id)}
                 onRemove={() => void removeProject(selectedProject.id)}
                 onOpenSettings={openSettings}
-                setupReady={setupReady}
-                warmingSetup={warmingSetup}
-                online={effectiveOnline}
-                onPrimeSetup={primeWorkspaceSetup}
                 transcriptSearchRef={transcriptSearchRef}
                 canSearch={selectedProjectView?.canSearchTranscript ?? false}
                 canEdit={selectedProject.status === "ready"}
@@ -452,12 +420,6 @@ export function TranscribbleApp() {
           ) : (
             <EmptyState
               onImport={openFilePicker}
-              onPrimeSetup={primeWorkspaceSetup}
-              onOpenSettings={openSettings}
-              setupReady={setupReady}
-              warming={warmingSetup}
-              online={effectiveOnline}
-              helperAvailable={helperAvailable}
               desktopAppInstalled={installState.installed}
               desktopInstallAvailable={installState.installPromptAvailable}
               onOpenDesktopApp={openDesktopApp}

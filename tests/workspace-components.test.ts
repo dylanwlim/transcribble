@@ -18,7 +18,7 @@ import { Sidebar } from "@/components/workspace/sidebar";
 import { TranscriptPane } from "@/components/workspace/transcript-pane";
 import { shouldRenderTurnHeader } from "@/components/workspace/transcript-pane";
 
-test("sidebar renders setup as a real button with the shared settings label", () => {
+test("sidebar exposes the desktop app affordance in the calm header", () => {
   const html = renderToStaticMarkup(
     createElement(Sidebar, {
       projects: [],
@@ -35,29 +35,16 @@ test("sidebar renders setup as a real button with the shared settings label", ()
       onTogglePin: () => undefined,
       onReorder: () => undefined,
       onToggleRecording: () => undefined,
-      onOpenSettings: () => undefined,
       isRecording: false,
       librarySearchRef: createRef<HTMLInputElement>(),
-      storageUsedBytes: 202 * 1024 * 1024,
-      storageAvailableBytes: 2 * 1024 * 1024 * 1024,
-      storagePersisted: true,
-      modelReady: true,
-      mediaReady: true,
-      online: true,
-      helperAvailable: false,
-      helperSummary: "Large recordings need the local accelerator",
       desktopAppInstalled: false,
       desktopInstallAvailable: false,
       onOpenDesktopApp: () => undefined,
     }),
   );
 
-  assert.match(html, /<button[^>]*aria-label="Open workspace settings"/);
-  assert.match(html, />Setup</);
   assert.match(html, /Desktop app/);
-  assert.match(html, /202 MB used/);
-  assert.match(html, /2\.0 GB available/);
-  assert.match(html, /Helper not connected/);
+  assert.match(html, /All Recordings/);
 });
 
 test("settings sheet renders the local workspace dialog heading", () => {
@@ -115,12 +102,6 @@ test("empty state copy keeps local-first import guidance", () => {
   const html = renderToStaticMarkup(
     createElement(EmptyState, {
       onImport: () => undefined,
-      onPrimeSetup: () => undefined,
-      onOpenSettings: () => undefined,
-      setupReady: false,
-      warming: false,
-      online: true,
-      helperAvailable: false,
       desktopAppInstalled: false,
       desktopInstallAvailable: false,
       onOpenDesktopApp: () => undefined,

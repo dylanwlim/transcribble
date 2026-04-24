@@ -5,11 +5,11 @@ import {
   Copy,
   Download,
   Info,
+  MoreHorizontal,
   RotateCw,
-  ShieldCheck,
   Trash2,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
 import { formatDuration } from "@/lib/transcribble/transcript";
@@ -60,13 +60,10 @@ interface StageProps {
   onCopy: () => void;
   copied: boolean;
   onExport: () => void;
+  onDownloadTxt: () => void;
   onRetry: () => void;
   onRemove: () => void;
   onOpenSettings: () => void;
-  setupReady: boolean;
-  warmingSetup: boolean;
-  online: boolean;
-  onPrimeSetup: () => void | Promise<void>;
   transcriptSearchRef: React.Ref<HTMLInputElement>;
   canSearch: boolean;
   canEdit: boolean;
@@ -107,13 +104,10 @@ export function Stage(props: StageProps) {
     onCopy,
     copied,
     onExport,
+    onDownloadTxt,
     onRetry,
     onRemove,
     onOpenSettings,
-    setupReady,
-    warmingSetup,
-    online,
-    onPrimeSetup,
     transcriptSearchRef,
     canSearch,
     canEdit,
@@ -126,6 +120,24 @@ export function Stage(props: StageProps) {
   const [playbackRate, setPlaybackRate] = useState(1);
   const [titleDraft, setTitleDraft] = useState(project.title);
   const [titleFocused, setTitleFocused] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onDown = (event: MouseEvent) => {
+      if (!moreRef.current?.contains(event.target as Node)) setMoreOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMoreOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [moreOpen]);
 
   useEffect(() => {
     setTitleDraft(project.title);
@@ -153,8 +165,6 @@ export function Stage(props: StageProps) {
   const isError = project.status === "error";
   const isPaused = project.status === "paused";
   const isReady = project.status === "ready";
-  const isHelperRoute = project.backend === "local-helper";
-  const showHelperRouteBanner = isHelperRoute && !isPaused && !isError;
   const needsLocalHelper = project.step === "needs-local-helper";
   const bookmarkActive = marks.some(
     (mark) => mark.kind === "bookmark" && mark.segmentId === focusedSegmentId,
@@ -175,9 +185,8 @@ export function Stage(props: StageProps) {
             ) : null}
             {canExport ? (
               <HeaderAction
-                label="Download transcript"
-                shortcut="⌘E"
-                onClick={onExport}
+                label="Download .txt"
+                onClick={onDownloadTxt}
                 icon={<Download className="h-3.5 w-3.5" />}
               />
             ) : null}
@@ -231,51 +240,77 @@ export function Stage(props: StageProps) {
         </div>
 
         <div className="order-3 flex items-center justify-center gap-1 sm:justify-end">
-          {isError ? (
+          <div ref={moreRef} className="relative">
             <HeaderAction
-              label="Remove"
-              onClick={onRemove}
-              icon={<Trash2 className="h-3.5 w-3.5" />}
-              destructive
+              label="More"
+              onClick={() => setMoreOpen((o) => !o)}
+              icon={<MoreHorizontal className="h-3.5 w-3.5" />}
+              active={moreOpen}
             />
-          ) : null}
-          <HeaderAction
-            label={inspectorOpen ? "Hide details" : "Show details"}
-            shortcut="⌘\\"
-            onClick={onToggleInspector}
-            icon={<Info className="h-3.5 w-3.5" />}
-            active={inspectorOpen}
-          />
-        </div>
-      </header>
-
-      {!setupReady ? (
-        <SetupBanner
-          online={online}
-          warming={warmingSetup}
-          onPrime={onPrimeSetup}
-        />
-      ) : null}
-
-      {showHelperRouteBanner ? (
-        <div className="mx-6 mt-3 flex items-start gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3 text-[12px] leading-5 text-foreground animate-rise-in">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-          <div className="min-w-0">
-            <div className="font-medium">
-              {needsLocalHelper
-                ? "Local accelerator required."
-                : isReady
-                  ? "Local accelerator transcript completed."
-                  : "Local accelerator in progress."}
-            </div>
-            <div className="mt-0.5 text-muted-foreground">
-              {needsLocalHelper
-                ? "Long or memory-heavy recordings stay saved here, but they need the Transcribble Helper running on this machine before transcription can continue."
-                : "This recording was routed to the local accelerator because the browser path was not reliable enough for a full pass."}
-            </div>
+            {moreOpen ? (
+              <div
+                role="menu"
+                className="absolute right-0 top-10 z-20 w-52 origin-top-right rounded-lg border border-border bg-popover p-1 text-sm shadow-[var(--shadow-float)] animate-rise-in"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    onToggleInspector();
+                    setMoreOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted"
+                >
+                  <Info className="h-3.5 w-3.5" />
+                  {inspectorOpen ? "Hide details" : "Show details"}
+                  <span className="ml-auto text-[10px] text-subtle">⌘\</span>
+                </button>
+                {canExport ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      onExport();
+                      setMoreOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Export as…
+                    <span className="ml-auto text-[10px] text-subtle">⌘E</span>
+                  </button>
+                ) : null}
+                {isError ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      onRetry();
+                      setMoreOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted"
+                  >
+                    <RotateCw className="h-3.5 w-3.5" />
+                    Try again
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    onRemove();
+                    setMoreOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-record hover:bg-record-soft"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete recording
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
-      ) : null}
+      </header>
 
       {isPaused ? (
         <div className="mx-6 mt-3 flex items-start justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-[12px] leading-5 text-foreground animate-rise-in">
@@ -447,41 +482,6 @@ function HeaderAction({
       {icon}
       {badge ? <span className="hidden sm:inline">{badge}</span> : null}
     </button>
-  );
-}
-
-function SetupBanner({
-  online,
-  warming,
-  onPrime,
-}: {
-  online: boolean;
-  warming: boolean;
-  onPrime: () => void | Promise<void>;
-}) {
-  return (
-    <div className="mx-6 mt-3 flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-4 py-2.5 text-[12px] animate-rise-in">
-      <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-primary" />
-      <div className="min-w-0 flex-1 leading-5">
-        <span className="font-medium text-foreground">One-time setup.</span>{" "}
-        <span className="text-muted-foreground">
-          {online
-            ? "Download the local tools once, then Transcribble stays on this device."
-            : "Go online once so the browser can cache its local tools."}
-        </span>
-      </div>
-      <button
-        type="button"
-        onClick={() => void onPrime()}
-        disabled={warming || !online}
-        className={cn(
-          "inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] font-medium",
-          "hover:bg-muted disabled:opacity-50 ring-focus",
-        )}
-      >
-        {warming ? "Getting ready…" : "Get ready"}
-      </button>
-    </div>
   );
 }
 
