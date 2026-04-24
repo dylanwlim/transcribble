@@ -232,8 +232,14 @@ export function Stage(props: StageProps) {
             <span>{formatDate(project.createdAt)}</span>
             <span className="text-border-strong">·</span>
             <span>{formatDuration(duration)}</span>
-            <span className="text-border-strong">·</span>
-            <span className="truncate">{project.sourceName}</span>
+            {stripExtension(project.sourceName) !== project.title ? (
+              <>
+                <span className="text-border-strong">·</span>
+                <span className="truncate" title={project.sourceName}>
+                  {project.sourceName}
+                </span>
+              </>
+            ) : null}
             <span className="text-border-strong">·</span>
             <span>{getBackendLabel(project.backend)}</span>
           </div>
@@ -394,7 +400,10 @@ export function Stage(props: StageProps) {
               onTimeUpdate={mediaHandlers.onTimeUpdate}
               onPlay={mediaHandlers.onPlay}
               onPause={mediaHandlers.onPause}
-              className="mx-auto block max-h-36 w-full object-contain"
+              className={cn(
+                "mx-auto block w-full object-contain transition-[max-height] duration-300",
+                isReady ? "max-h-36" : "max-h-20",
+              )}
               controls={false}
             />
           </div>
@@ -494,4 +503,9 @@ function formatDate(iso: string) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function stripExtension(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(0, dot) : name;
 }

@@ -305,16 +305,30 @@ function ProjectRow({
           </div>
 
           {isActive ? (
-            <div className="mt-2 flex items-center gap-2">
-              <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-border/60">
+            <div className="mt-2 space-y-1">
+              <div
+                className={cn(
+                  "truncate text-[10px] font-medium uppercase tracking-[0.14em]",
+                  selected ? "text-primary-foreground/80" : "text-subtle",
+                )}
+                title={project.stageLabel}
+              >
+                {project.stageLabel}
+              </div>
+              <div
+                className={cn(
+                  "relative h-1 overflow-hidden rounded-full",
+                  selected ? "bg-primary-foreground/25" : "bg-border/60",
+                )}
+              >
                 <div
-                  className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out"
+                  className={cn(
+                    "h-full rounded-full transition-[width] duration-500 ease-out",
+                    selected ? "bg-primary-foreground" : "bg-primary",
+                  )}
                   style={{ width: `${progress}%` }}
                 />
               </div>
-              <span className="text-[10px] uppercase tracking-wider text-subtle">
-                {project.stageLabel}
-              </span>
             </div>
           ) : null}
 
@@ -645,9 +659,11 @@ export function Sidebar({
                   Library
                 </div>
                 {ready.length === 0 ? (
-                <div className="px-2 py-6 text-[12px] leading-5 text-muted-foreground">
-                    {ADD_RECORDING_HELPER}
-                </div>
+                  <div className="px-2 py-6 text-[12px] leading-5 text-muted-foreground">
+                    {active.length > 0
+                      ? "Finished recordings land here once they're ready."
+                      : ADD_RECORDING_HELPER}
+                  </div>
               ) : (
                   <div className="space-y-0.5">
                     {ready.map((project) => (
