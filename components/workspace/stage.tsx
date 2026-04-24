@@ -172,9 +172,9 @@ export function Stage(props: StageProps) {
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-background">
-      <header className="grid grid-cols-1 items-center gap-3 border-b border-border px-4 py-3 sm:grid-cols-[1fr_minmax(0,22rem)_1fr] sm:px-6">
+      <header className="grid grid-cols-1 items-center gap-3 border-b border-border px-4 py-2 sm:h-[var(--workspace-header-height)] sm:grid-cols-[1fr_minmax(0,22rem)_1fr] sm:px-6">
         <div className="min-w-0 order-2 sm:order-1">
-          <div className="flex items-center gap-1 rounded-full border border-border bg-surface/70 p-1">
+          <div className="inline-flex items-center gap-0.5 rounded-full border border-border bg-surface/70 p-0.5">
             {canExport ? (
               <HeaderAction
                 label="Copy transcript"
@@ -481,9 +481,9 @@ function HeaderAction({
       title={shortcut ? `${label} (${shortcut})` : label}
       aria-label={label}
       className={cn(
-        "inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium",
-        "text-subtle transition-colors duration-150 hover:bg-muted hover:text-foreground",
-        "ring-focus",
+        "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium",
+        "text-subtle transition-all duration-150 hover:bg-muted hover:text-foreground",
+        "motion-safe:active:scale-[0.96] ring-focus",
         active && "bg-muted text-foreground",
         destructive && "hover:text-record hover:bg-record-soft",
       )}

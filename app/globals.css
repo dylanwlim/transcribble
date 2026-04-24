@@ -34,6 +34,7 @@
     --workspace-mobile-padding: clamp(1rem, 3vw, 1.5rem);
     --workspace-footer-padding: 1rem;
     --workspace-floating-offset: 1.25rem;
+    --workspace-header-height: 4rem;
 
     --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
     --ease-spring: cubic-bezier(0.3, 1.3, 0.4, 1);

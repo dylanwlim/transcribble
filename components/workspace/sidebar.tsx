@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Download,
   FileAudio,
   HardDrive,
   Mic,
@@ -47,6 +48,7 @@ interface SidebarProps {
   onRemove: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onTogglePin: (id: string) => void;
+  onExport: (id: string) => void;
   onReorder: (sourceId: string, targetId: string, position: "before" | "after") => void;
   onToggleRecording: () => void | Promise<void>;
   onOpenSettings: () => void;
@@ -132,6 +134,7 @@ function ProjectRow({
   onRemove,
   onRename,
   onTogglePin,
+  onExport,
   onDragStartRow,
   onDropOnRow,
 }: {
@@ -142,6 +145,7 @@ function ProjectRow({
   onRemove: () => void;
   onRename: (title: string) => void;
   onTogglePin: () => void;
+  onExport: () => void;
   onDragStartRow: (id: string) => void;
   onDropOnRow: (targetId: string, position: "before" | "after") => void;
 }) {
@@ -363,7 +367,7 @@ function ProjectRow({
         <div
           role="menu"
           onClick={(event) => event.stopPropagation()}
-          className="absolute right-2 top-9 z-10 w-44 origin-top-right rounded-lg border border-border bg-popover p-1 text-sm shadow-[var(--shadow-float)] animate-rise-in"
+          className="absolute right-2 top-9 z-10 w-48 origin-top-right rounded-lg border border-border bg-popover p-1 text-sm text-foreground shadow-[var(--shadow-float)] animate-rise-in"
         >
           {isRetryable ? (
             <button
@@ -412,6 +416,21 @@ function ProjectRow({
               </>
             )}
           </button>
+          {project.status === "ready" ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                onExport();
+                setMenuOpen(false);
+              }}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Save transcript…
+            </button>
+          ) : null}
+          <div className="my-1 h-px bg-border/60" />
           <button
             type="button"
             role="menuitem"
@@ -470,6 +489,7 @@ export function Sidebar({
   onRemove,
   onRename,
   onTogglePin,
+  onExport,
   onReorder,
   onToggleRecording,
   onOpenSettings,
@@ -516,15 +536,15 @@ export function Sidebar({
 
   return (
     <aside className={cn("flex h-full min-h-0 w-full flex-col border-r border-border bg-surface", className)}>
-      <div className="border-b border-border/70 px-3 pt-3 pb-3">
+      <div className="flex h-[var(--workspace-header-height)] shrink-0 items-center border-b border-border px-3">
         <button
           type="button"
           onClick={onOpenLibrary}
           title="View all recordings"
           aria-label="View all recordings"
           className={cn(
-            "group flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition-colors duration-150 ring-focus",
-            "hover:bg-muted/60",
+            "group flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left ring-focus",
+            "transition-all duration-150 hover:bg-muted/60 motion-safe:active:scale-[0.98]",
           )}
         >
           <BrandMark className="h-7 w-7 shrink-0" />
@@ -660,6 +680,7 @@ export function Sidebar({
                         onRemove={() => onRemove(project.id)}
                         onRename={(title) => onRename(project.id, title)}
                         onTogglePin={() => onTogglePin(project.id)}
+                        onExport={() => onExport(project.id)}
                         onDragStartRow={(id) => {
                           dragSourceRef.current = id;
                         }}
@@ -696,6 +717,7 @@ export function Sidebar({
                         onRemove={() => onRemove(project.id)}
                         onRename={(title) => onRename(project.id, title)}
                         onTogglePin={() => onTogglePin(project.id)}
+                        onExport={() => onExport(project.id)}
                         onDragStartRow={(id) => {
                           dragSourceRef.current = id;
                         }}
@@ -758,16 +780,8 @@ function SidebarFooter({
         : "Storage available";
 
   return (
-    <div className="border-t border-border px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2.5">
-      <button
-        type="button"
-        onClick={onOpenSettings}
-        aria-label="Workspace status · open settings"
-        className={cn(
-          "group flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors duration-150 ring-focus",
-          "hover:bg-muted/60",
-        )}
-      >
+    <div className="flex items-center gap-2 border-t border-border px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2.5">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
         <FooterChip
           icon={<Zap className="h-3 w-3" />}
           label={helperAvailable ? "Accelerator" : "Browser"}
@@ -784,9 +798,18 @@ function SidebarFooter({
           ok={!storageTight && storagePersisted !== false}
           title={storageTitle}
         />
-        <span className="ml-auto text-[10px] font-medium uppercase tracking-[0.16em] text-subtle transition-colors duration-150 group-hover:text-foreground">
-          Settings
-        </span>
+      </div>
+      <button
+        type="button"
+        onClick={onOpenSettings}
+        aria-label="Open settings"
+        title="Open settings"
+        className={cn(
+          "inline-flex shrink-0 items-center rounded-md px-2 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-subtle",
+          "transition-all duration-150 hover:bg-muted/60 hover:text-foreground motion-safe:active:scale-[0.97] ring-focus",
+        )}
+      >
+        Settings
       </button>
     </div>
   );

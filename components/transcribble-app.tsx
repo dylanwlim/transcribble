@@ -313,6 +313,11 @@ export function TranscribbleApp() {
         onRemove={(id) => void removeProject(id)}
         onRename={renameProject}
         onTogglePin={togglePinProject}
+        onExport={(id) => {
+          selectProject(id);
+          setExportOpen(true);
+          finishAction();
+        }}
         onReorder={reorderProjects}
         onToggleRecording={() => {
           void toggleRecording();

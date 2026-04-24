@@ -33,6 +33,7 @@ test("sidebar exposes the desktop app affordance and a calm status footer", () =
       onRemove: () => undefined,
       onRename: () => undefined,
       onTogglePin: () => undefined,
+      onExport: () => undefined,
       onReorder: () => undefined,
       onToggleRecording: () => undefined,
       onOpenSettings: () => undefined,
