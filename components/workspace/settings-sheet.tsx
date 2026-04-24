@@ -487,22 +487,26 @@ export function SettingsSheet({
             </DisclosureCard>
           </Block>
 
-          {installPromptAvailable || installed ? (
-            <Block title="Install">
-              <Row
-                label="Desktop app"
-                detail={installed ? "Installed on this device" : "Install to launch like a native app"}
-                ready={installed}
-              >
-                {installPromptAvailable && !installed ? (
-                  <ActionButton onClick={() => void onInstall()}>
-                    <Download className="h-3 w-3" />
-                    Install
-                  </ActionButton>
-                ) : null}
-              </Row>
-            </Block>
-          ) : null}
+          <Block title="Desktop app">
+            <Row
+              label="One-click launch"
+              detail={
+                installed
+                  ? "Installed on this device. Launch from Dock, Taskbar, or Home Screen."
+                  : installPromptAvailable
+                    ? "Install Transcribble so it opens in its own window."
+                    : "See the steps to install in your browser."
+              }
+              ready={installed}
+            >
+              {installed ? null : (
+                <ActionButton onClick={() => void onInstall()}>
+                  <Download className="h-3 w-3" />
+                  {installPromptAvailable ? "Install" : "Set up"}
+                </ActionButton>
+              )}
+            </Row>
+          </Block>
 
           <Block title="Appearance">
             <Row label="Theme" detail="System, light, or dark">

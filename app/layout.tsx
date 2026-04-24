@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, Manrope } from "next/font/google";
 
 import "./globals.css";
@@ -30,6 +30,16 @@ export const metadata: Metadata = {
     title: "Transcribble",
   },
   metadataBase: new URL("https://transcribble-rho.vercel.app"),
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#fafaf9" },
+    { media: "(prefers-color-scheme: dark)", color: "#1a1a1a" },
+  ],
+  viewportFit: "cover",
+  width: "device-width",
+  initialScale: 1,
 };
 
 const themeScript = `

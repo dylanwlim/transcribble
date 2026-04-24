@@ -2,6 +2,7 @@
 
 import {
   FileAudio,
+  HardDrive,
   Mic,
   MoreHorizontal,
   MonitorUp,
@@ -15,6 +16,7 @@ import {
   Upload,
   Video,
   X,
+  Zap,
 } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
@@ -23,6 +25,7 @@ import {
   ADD_RECORDING_HELPER,
   ADD_RECORDING_LABEL,
 } from "@/lib/transcribble/constants";
+import { buildStorageStatus } from "@/lib/transcribble/storage";
 import { formatDuration } from "@/lib/transcribble/transcript";
 import type {
   LibrarySearchResult,
@@ -45,8 +48,13 @@ interface SidebarProps {
   onTogglePin: (id: string) => void;
   onReorder: (sourceId: string, targetId: string, position: "before" | "after") => void;
   onToggleRecording: () => void | Promise<void>;
+  onOpenSettings: () => void;
   isRecording: boolean;
   librarySearchRef: React.Ref<HTMLInputElement>;
+  helperAvailable: boolean;
+  storageUsedBytes: number | null;
+  storageAvailableBytes: number | null;
+  storagePersisted: boolean | null;
   desktopAppInstalled: boolean;
   desktopInstallAvailable: boolean;
   onOpenDesktopApp: () => void | Promise<void>;
@@ -448,8 +456,13 @@ export function Sidebar({
   onTogglePin,
   onReorder,
   onToggleRecording,
+  onOpenSettings,
   isRecording,
   librarySearchRef,
+  helperAvailable,
+  storageUsedBytes,
+  storageAvailableBytes,
+  storagePersisted,
   desktopAppInstalled,
   desktopInstallAvailable,
   onOpenDesktopApp,
@@ -665,7 +678,110 @@ export function Sidebar({
         </div>
       </div>
 
+      <SidebarFooter
+        helperAvailable={helperAvailable}
+        storageUsedBytes={storageUsedBytes}
+        storageAvailableBytes={storageAvailableBytes}
+        storagePersisted={storagePersisted}
+        onOpenSettings={onOpenSettings}
+      />
     </aside>
+  );
+}
+
+function SidebarFooter({
+  helperAvailable,
+  storageUsedBytes,
+  storageAvailableBytes,
+  storagePersisted,
+  onOpenSettings,
+}: {
+  helperAvailable: boolean;
+  storageUsedBytes: number | null;
+  storageAvailableBytes: number | null;
+  storagePersisted: boolean | null;
+  onOpenSettings: () => void;
+}) {
+  const storage = buildStorageStatus(storageUsedBytes, storageAvailableBytes);
+  const total =
+    typeof storageUsedBytes === "number" && typeof storageAvailableBytes === "number"
+      ? storageUsedBytes + storageAvailableBytes
+      : null;
+  const storageTight =
+    total && typeof storageAvailableBytes === "number"
+      ? storageAvailableBytes / total < 0.15
+      : false;
+  const storageLabel = storage.availableLabel
+    ? storage.availableLabel.replace(" available", " free")
+    : storage.usedLabel || "Storage ready";
+  const storageTitle =
+    storagePersisted === false
+      ? "Browser may clear saved files if storage gets tight."
+      : storage.availableLabel
+        ? `${storage.usedLabel ?? ""}${storage.usedLabel ? " · " : ""}${storage.availableLabel} available`
+        : "Storage available";
+
+  return (
+    <div className="border-t border-border px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2.5">
+      <button
+        type="button"
+        onClick={onOpenSettings}
+        aria-label="Workspace status · open settings"
+        className={cn(
+          "group flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors duration-150 ring-focus",
+          "hover:bg-muted/60",
+        )}
+      >
+        <FooterChip
+          icon={<Zap className="h-3 w-3" />}
+          label={helperAvailable ? "Accelerator" : "Browser"}
+          ok={helperAvailable}
+          title={
+            helperAvailable
+              ? "Local accelerator is reachable on this machine."
+              : "Local accelerator is not running. Long recordings will not process."
+          }
+        />
+        <FooterChip
+          icon={<HardDrive className="h-3 w-3" />}
+          label={storageLabel}
+          ok={!storageTight && storagePersisted !== false}
+          title={storageTitle}
+        />
+        <span className="ml-auto text-[10px] font-medium uppercase tracking-[0.16em] text-subtle transition-colors duration-150 group-hover:text-foreground">
+          Settings
+        </span>
+      </button>
+    </div>
+  );
+}
+
+function FooterChip({
+  icon,
+  label,
+  ok,
+  title,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  ok: boolean;
+  title: string;
+}) {
+  return (
+    <span
+      title={title}
+      className="inline-flex min-w-0 items-center gap-1.5 text-[11px] text-foreground/80 tabular"
+    >
+      <span
+        className={cn(
+          "inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full",
+          ok ? "bg-success/15 text-success" : "bg-warning/15 text-warning",
+        )}
+      >
+        {icon}
+      </span>
+      <span className="min-w-0 truncate">{label}</span>
+    </span>
   );
 }
 

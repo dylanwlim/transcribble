@@ -18,7 +18,7 @@ import { Sidebar } from "@/components/workspace/sidebar";
 import { TranscriptPane } from "@/components/workspace/transcript-pane";
 import { shouldRenderTurnHeader } from "@/components/workspace/transcript-pane";
 
-test("sidebar exposes the desktop app affordance in the calm header", () => {
+test("sidebar exposes the desktop app affordance and a calm status footer", () => {
   const html = renderToStaticMarkup(
     createElement(Sidebar, {
       projects: [],
@@ -35,8 +35,13 @@ test("sidebar exposes the desktop app affordance in the calm header", () => {
       onTogglePin: () => undefined,
       onReorder: () => undefined,
       onToggleRecording: () => undefined,
+      onOpenSettings: () => undefined,
       isRecording: false,
       librarySearchRef: createRef<HTMLInputElement>(),
+      helperAvailable: true,
+      storageUsedBytes: 202 * 1024 * 1024,
+      storageAvailableBytes: 2 * 1024 * 1024 * 1024,
+      storagePersisted: true,
       desktopAppInstalled: false,
       desktopInstallAvailable: false,
       onOpenDesktopApp: () => undefined,
@@ -45,6 +50,9 @@ test("sidebar exposes the desktop app affordance in the calm header", () => {
 
   assert.match(html, /Desktop app/);
   assert.match(html, /All Recordings/);
+  assert.match(html, /Accelerator/);
+  assert.match(html, /2\.0 GB free/);
+  assert.match(html, /Settings/);
 });
 
 test("settings sheet renders the local workspace dialog heading", () => {

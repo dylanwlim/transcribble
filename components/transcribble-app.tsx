@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Menu, Settings2, Upload, X } from "lucide-react";
+import { AlertTriangle, Menu, Upload, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useTranscribble } from "@/hooks/use-transcribble";
@@ -19,6 +19,11 @@ import { CommandPalette } from "@/components/workspace/command-palette";
 import { DropOverlay, EmptyState } from "@/components/workspace/empty-state";
 import { ExportSheet } from "@/components/workspace/export-sheet";
 import { Inspector } from "@/components/workspace/inspector";
+import {
+  detectInstallPlatform,
+  InstallSheet,
+  type InstallPlatform,
+} from "@/components/workspace/install-sheet";
 import { SettingsSheet } from "@/components/workspace/settings-sheet";
 import { Sidebar } from "@/components/workspace/sidebar";
 import { Stage } from "@/components/workspace/stage";
@@ -108,6 +113,8 @@ export function TranscribbleApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [installSheetOpen, setInstallSheetOpen] = useState(false);
+  const [installPlatform, setInstallPlatform] = useState<InstallPlatform>("generic");
 
   useEffect(() => {
     const handler = () => setPaletteOpen(true);
@@ -153,32 +160,24 @@ export function TranscribbleApp() {
   }, []);
 
   const openDesktopApp = useCallback(async () => {
-    if (installState.installPromptAvailable) {
-      await promptInstall();
-      return;
-    }
-
     if (typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches) {
       setNotice({ tone: "info", message: "Transcribble is already open as the desktop app." });
       return;
     }
 
-    if (installState.installed && typeof window !== "undefined") {
-      window.open(window.location.origin, "_blank", "noopener,noreferrer");
-      setNotice({
-        tone: "info",
-        message:
-          "Opened Transcribble in a new window. If your browser keeps it in a tab, launch the installed app from Dock or Applications.",
-      });
+    if (installState.installPromptAvailable) {
+      await promptInstall();
       return;
     }
 
-    setNotice({
-      tone: "info",
-      message:
-        "This browser is not exposing the desktop app prompt yet. Use the browser install option, then launch Transcribble from Dock or Applications.",
-    });
-  }, [installState.installPromptAvailable, installState.installed, promptInstall, setNotice]);
+    setInstallPlatform(detectInstallPlatform());
+    setInstallSheetOpen(true);
+  }, [installState.installPromptAvailable, promptInstall, setNotice]);
+
+  const openInNewWindow = useCallback(() => {
+    if (typeof window === "undefined") return;
+    window.open(window.location.origin, "_blank", "noopener,noreferrer");
+  }, []);
 
   // Global shortcuts (additive — the hook already handles Space / ⌘K / / / J / K / B)
   useEffect(() => {
@@ -309,8 +308,16 @@ export function TranscribbleApp() {
           void toggleRecording();
           finishAction();
         }}
+        onOpenSettings={() => {
+          openSettings();
+          finishAction();
+        }}
         isRecording={isRecording}
         librarySearchRef={librarySearchRef}
+        helperAvailable={helperAvailable}
+        storageUsedBytes={storageState?.usage ?? null}
+        storageAvailableBytes={storageState?.available ?? null}
+        storagePersisted={storageState?.persisted ?? null}
         desktopAppInstalled={installState.installed}
         desktopInstallAvailable={installState.installPromptAvailable}
         onOpenDesktopApp={() => void openDesktopApp()}
@@ -346,7 +353,6 @@ export function TranscribbleApp() {
         <MobileHeader
           onOpenSidebar={() => setMobileSidebarOpen(true)}
           onImport={openFilePicker}
-          onOpenSettings={openSettings}
         />
 
         <main className="relative flex min-h-0 min-w-0 flex-1">
@@ -427,7 +433,7 @@ export function TranscribbleApp() {
             />
           )}
 
-          <SettingsLaunch onOpen={openSettings} hidden={emptyState} />
+          <SettingsLaunch onOpen={openSettings} />
         </main>
 
         {effectiveNotice && !settingsOpen && !exportOpen && !paletteOpen ? (
@@ -486,6 +492,14 @@ export function TranscribbleApp() {
         copied={copied}
       />
 
+      <InstallSheet
+        open={installSheetOpen}
+        onClose={() => setInstallSheetOpen(false)}
+        platform={installPlatform}
+        installed={installState.installed}
+        onOpenInNewWindow={installState.installed ? openInNewWindow : undefined}
+      />
+
       <SettingsSheet
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
@@ -504,7 +518,7 @@ export function TranscribbleApp() {
         onAskForPersistent={askForPersistentStorage}
         installPromptAvailable={installState.installPromptAvailable}
         installed={installState.installed}
-        onInstall={promptInstall}
+        onInstall={() => void openDesktopApp()}
         helperAvailable={helperAvailable}
         helperSummary={helperSummary}
         helperNextAction={helperNextAction}
@@ -555,11 +569,9 @@ export function TranscribbleApp() {
 function MobileHeader({
   onOpenSidebar,
   onImport,
-  onOpenSettings,
 }: {
   onOpenSidebar: () => void;
   onImport: () => void;
-  onOpenSettings: () => void;
 }) {
   return (
     <div className="flex items-center gap-2 border-b border-border bg-background/95 px-[var(--workspace-mobile-padding)] pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur lg:hidden">
@@ -599,14 +611,6 @@ function MobileHeader({
       >
         <Upload className="h-4 w-4" />
       </button>
-      <button
-        type="button"
-        onClick={onOpenSettings}
-        aria-label={SETTINGS_OPEN_LABEL}
-        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-subtle shadow-[var(--shadow-soft)] transition-colors duration-150 hover:bg-muted hover:text-foreground ring-focus"
-      >
-        <Settings2 className="h-4 w-4" />
-      </button>
     </div>
   );
 }
@@ -642,17 +646,7 @@ function MobileSidebarDrawer({
   );
 }
 
-function SettingsLaunch({
-  onOpen,
-  hidden = false,
-}: {
-  onOpen: () => void;
-  hidden?: boolean;
-}) {
-  if (hidden) {
-    return null;
-  }
-
+function SettingsLaunch({ onOpen }: { onOpen: () => void }) {
   return (
     <button
       type="button"
@@ -660,7 +654,7 @@ function SettingsLaunch({
       aria-label={SETTINGS_OPEN_LABEL}
       title={`${SETTINGS_OPEN_LABEL} (${formatShortcutTitle("settings")})`}
       className={cn(
-        "absolute bottom-[max(var(--workspace-floating-offset),env(safe-area-inset-bottom))] right-[max(var(--workspace-floating-offset),env(safe-area-inset-right))] z-30 hidden h-11 w-11 items-center justify-center rounded-full lg:flex",
+        "absolute bottom-[max(var(--workspace-floating-offset),env(safe-area-inset-bottom))] right-[max(var(--workspace-floating-offset),env(safe-area-inset-right))] z-30 flex h-11 w-11 items-center justify-center rounded-full",
         "border border-border bg-surface text-subtle shadow-[var(--shadow-soft)]",
         "transition-colors duration-150 hover:text-foreground hover:bg-muted ring-focus",
       )}
