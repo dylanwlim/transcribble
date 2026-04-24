@@ -11,7 +11,9 @@ Start here:
 Repo truth:
 - Single-route Next.js 15 App Router app. `app/page.tsx` mounts `components/transcribble-app.tsx`.
 - Main controller: `hooks/use-transcribble.ts`.
-- Main workspace shell: `components/workspace/sidebar.tsx`, `stage.tsx`, `transcript-pane.tsx`, `inspector.tsx`, `export-sheet.tsx`, `settings-sheet.tsx`.
+- Main workspace shell: `components/workspace/sidebar.tsx`, `stage.tsx`, `transcript-pane.tsx`, `inspector.tsx`, `export-sheet.tsx`, `settings-sheet.tsx`, `library-overview.tsx`, `brand-mark.tsx`.
+- The sidebar/mobile brand header (logo + "Transcribble") clears the selected project and renders `library-overview.tsx`, the aggregated All Recordings grid. The favicon and apple-touch icon are rendered from `app/icon.tsx` and `app/apple-icon.tsx` using the same mark as `BrandMark`.
+- Transcript playback highlight is driven by an rAF loop in `hooks/use-transcribble.ts` while the media is playing, so the `playbackSegmentId` tracks `media.currentTime` in real time instead of the ~4Hz `timeupdate` event.
 - Browser-local processing boundary: `workers/transcriber.worker.ts` plus `lib/transcribble/media.ts`.
 - Local accelerator boundary: `helper/transcribble_helper.py`, `lib/transcribble/local-helper-client.ts`, `lib/transcribble/local-helper-state.ts`, and `lib/transcribble/transcription-backends.ts`.
 - Persistence boundary: `lib/transcribble/workspace-db.ts` plus `lib/transcribble/storage.ts`.

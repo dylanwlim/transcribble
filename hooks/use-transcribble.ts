@@ -1853,6 +1853,15 @@ export function useTranscribble() {
     [persistProjectSelection],
   );
 
+  const clearProjectSelection = useCallback(() => {
+    setSelectedProjectId(null);
+    persistProjectSelection(null);
+    setActiveSegmentId(null);
+    setTranscriptQuery("");
+    setPartialTranscript("");
+    setNotice(null);
+  }, [persistProjectSelection]);
+
   const activeDuration = selectedProject?.transcript?.stats.duration ?? selectedProject?.duration;
 
   const seekToTime = useCallback(
@@ -2656,6 +2665,23 @@ export function useTranscribble() {
     onPause: () => setIsPlaying(false),
   };
 
+  // The HTMLMediaElement `timeupdate` event fires at ~4 Hz, which is why
+  // the transcript highlight visibly lags the audio. While playing, poll
+  // currentTime on every animation frame so the highlight tracks in real time.
+  useEffect(() => {
+    if (!isPlaying) return;
+    let raf = 0;
+    const tick = () => {
+      const media = mediaRef.current;
+      if (media && !media.paused) {
+        setCurrentTime(media.currentTime);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [isPlaying]);
+
   return {
     inputRef,
     mediaRef,
@@ -2709,6 +2735,7 @@ export function useTranscribble() {
     onCopyTranscript,
     onDownloadTranscript,
     selectProject,
+    clearProjectSelection,
     seekToTime,
     seekByDelta,
     selectSegment,

@@ -31,6 +31,7 @@ import type {
   LibrarySearchResult,
   TranscriptProject,
 } from "@/lib/transcribble/types";
+import { BrandMark } from "./brand-mark";
 import { KeyboardShortcut } from "./keyboard-shortcut";
 
 interface SidebarProps {
@@ -49,6 +50,7 @@ interface SidebarProps {
   onReorder: (sourceId: string, targetId: string, position: "before" | "after") => void;
   onToggleRecording: () => void | Promise<void>;
   onOpenSettings: () => void;
+  onOpenLibrary: () => void;
   isRecording: boolean;
   librarySearchRef: React.Ref<HTMLInputElement>;
   helperAvailable: boolean;
@@ -471,6 +473,7 @@ export function Sidebar({
   onReorder,
   onToggleRecording,
   onOpenSettings,
+  onOpenLibrary,
   isRecording,
   librarySearchRef,
   helperAvailable,
@@ -513,6 +516,23 @@ export function Sidebar({
 
   return (
     <aside className={cn("flex h-full min-h-0 w-full flex-col border-r border-border bg-surface", className)}>
+      <div className="border-b border-border/70 px-3 pt-3 pb-3">
+        <button
+          type="button"
+          onClick={onOpenLibrary}
+          title="View all recordings"
+          aria-label="View all recordings"
+          className={cn(
+            "group flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition-colors duration-150 ring-focus",
+            "hover:bg-muted/60",
+          )}
+        >
+          <BrandMark className="h-7 w-7 shrink-0" />
+          <span className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-tight text-foreground">
+            Transcribble
+          </span>
+        </button>
+      </div>
       <div className="flex items-center justify-between gap-3 px-4 pb-1 pt-4">
         <div className="min-w-0">
           <div className="truncate text-[16px] font-semibold tracking-tight text-foreground">

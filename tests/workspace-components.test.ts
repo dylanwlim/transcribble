@@ -36,6 +36,7 @@ test("sidebar exposes the desktop app affordance and a calm status footer", () =
       onReorder: () => undefined,
       onToggleRecording: () => undefined,
       onOpenSettings: () => undefined,
+      onOpenLibrary: () => undefined,
       isRecording: false,
       librarySearchRef: createRef<HTMLInputElement>(),
       helperAvailable: true,

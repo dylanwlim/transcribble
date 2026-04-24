@@ -18,27 +18,33 @@ export default function Icon() {
           alignItems: "center",
           justifyContent: "center",
           backgroundColor: "#13151a",
-          backgroundImage: "radial-gradient(circle at 20% 20%, rgba(31,79,255,0.35), transparent 42%)",
-          color: "white",
-          fontFamily: "Manrope, sans-serif",
         }}
       >
         <div
           style={{
             display: "flex",
-            height: 320,
-            width: 320,
+            height: 384,
+            width: 384,
             alignItems: "center",
             justifyContent: "center",
-            borderRadius: 96,
-            backgroundImage: "linear-gradient(180deg, #2d5bff, #1f4fff)",
-            boxShadow: "0 32px 120px rgba(31,79,255,0.35)",
-            fontSize: 160,
-            fontWeight: 700,
-            letterSpacing: "-0.08em",
+            borderRadius: 112,
+            backgroundColor: "#f6f5f1",
+            boxShadow: "0 32px 120px rgba(15,15,20,0.45)",
           }}
         >
-          T
+          <svg
+            viewBox="0 0 24 24"
+            width="240"
+            height="240"
+            fill="#13151a"
+          >
+            <rect x="3" y="9" width="1.8" height="6" rx="0.9" />
+            <rect x="6" y="5.5" width="1.8" height="13" rx="0.9" />
+            <rect x="9" y="8" width="1.8" height="8" rx="0.9" />
+            <rect x="13" y="7.5" width="8" height="1.6" rx="0.8" />
+            <rect x="13" y="11.2" width="8" height="1.6" rx="0.8" />
+            <rect x="13" y="14.9" width="5.5" height="1.6" rx="0.8" />
+          </svg>
         </div>
       </div>
     ),

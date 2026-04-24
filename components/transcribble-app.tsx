@@ -15,6 +15,7 @@ import { getProjectViewState } from "@/lib/transcribble/status";
 import { formatBytes } from "@/lib/transcribble/transcript";
 import type { HighlightColor } from "@/lib/transcribble/types";
 
+import { BrandMark } from "@/components/workspace/brand-mark";
 import { CommandPalette } from "@/components/workspace/command-palette";
 import { DropOverlay, EmptyState } from "@/components/workspace/empty-state";
 import { ExportSheet } from "@/components/workspace/export-sheet";
@@ -24,6 +25,7 @@ import {
   InstallSheet,
   type InstallPlatform,
 } from "@/components/workspace/install-sheet";
+import { LibraryOverview } from "@/components/workspace/library-overview";
 import { SettingsSheet } from "@/components/workspace/settings-sheet";
 import { Sidebar } from "@/components/workspace/sidebar";
 import { Stage } from "@/components/workspace/stage";
@@ -71,6 +73,7 @@ export function TranscribbleApp() {
     onCopyTranscript,
     onDownloadTranscript,
     selectProject,
+    clearProjectSelection,
     selectSegment,
     selectAdjacentSegment,
     jumpToTranscriptMatch,
@@ -158,6 +161,13 @@ export function TranscribbleApp() {
     setMobileSidebarOpen(false);
     setSettingsOpen(true);
   }, []);
+
+  const openLibrary = useCallback(() => {
+    clearProjectSelection();
+    setInspectorOpen(false);
+    setExportOpen(false);
+    setMobileSidebarOpen(false);
+  }, [clearProjectSelection]);
 
   const openDesktopApp = useCallback(async () => {
     if (typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches) {
@@ -312,6 +322,10 @@ export function TranscribbleApp() {
           openSettings();
           finishAction();
         }}
+        onOpenLibrary={() => {
+          openLibrary();
+          finishAction();
+        }}
         isRecording={isRecording}
         librarySearchRef={librarySearchRef}
         helperAvailable={helperAvailable}
@@ -353,6 +367,7 @@ export function TranscribbleApp() {
         <MobileHeader
           onOpenSidebar={() => setMobileSidebarOpen(true)}
           onImport={openFilePicker}
+          onOpenLibrary={openLibrary}
         />
 
         <main className="relative flex min-h-0 min-w-0 flex-1">
@@ -424,12 +439,13 @@ export function TranscribbleApp() {
               ) : null}
             </>
           ) : (
-            <EmptyState
+            <LibraryOverview
+              projects={projects}
+              onOpenProject={selectProject}
               onImport={openFilePicker}
               desktopAppInstalled={installState.installed}
               desktopInstallAvailable={installState.installPromptAvailable}
               onOpenDesktopApp={openDesktopApp}
-              supportedFormats={supportedFormats}
             />
           )}
 
@@ -569,9 +585,11 @@ export function TranscribbleApp() {
 function MobileHeader({
   onOpenSidebar,
   onImport,
+  onOpenLibrary,
 }: {
   onOpenSidebar: () => void;
   onImport: () => void;
+  onOpenLibrary: () => void;
 }) {
   return (
     <div className="flex items-center gap-2 border-b border-border bg-background/95 px-[var(--workspace-mobile-padding)] pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur lg:hidden">
@@ -584,24 +602,17 @@ function MobileHeader({
         <Menu className="h-4 w-4" />
       </button>
 
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-foreground text-background">
-          <svg viewBox="0 0 16 16" className="h-4 w-4 fill-current" aria-hidden>
-            <rect x="2" y="6" width="1.6" height="4" rx="0.8" />
-            <rect x="5" y="3" width="1.6" height="10" rx="0.8" />
-            <rect x="8" y="5" width="1.6" height="6" rx="0.8" />
-            <rect x="11" y="2" width="1.6" height="12" rx="0.8" />
-          </svg>
-        </div>
-        <div className="min-w-0">
-          <div className="truncate text-[13px] font-semibold tracking-tight text-foreground">
-            Transcribble
-          </div>
-          <div className="truncate text-[11px] text-muted-foreground">
-            Local voice workspace
-          </div>
-        </div>
-      </div>
+      <button
+        type="button"
+        onClick={onOpenLibrary}
+        aria-label="View all recordings"
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-1.5 py-1 text-left ring-focus"
+      >
+        <BrandMark className="h-8 w-8 shrink-0" />
+        <span className="min-w-0 truncate text-[14px] font-semibold tracking-tight text-foreground">
+          Transcribble
+        </span>
+      </button>
 
       <button
         type="button"
