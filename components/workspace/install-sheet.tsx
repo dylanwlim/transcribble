@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, MonitorUp, X } from "lucide-react";
+import { ChevronRight, X } from "lucide-react";
 import { useEffect } from "react";
 
 import { cn } from "@/lib/utils";
@@ -10,6 +10,7 @@ export type InstallPlatform =
   | "ios-safari"
   | "mac-safari"
   | "firefox"
+  | "brave"
   | "generic";
 
 export function detectInstallPlatform(): InstallPlatform {
@@ -18,6 +19,11 @@ export function detectInstallPlatform(): InstallPlatform {
 
   if (/iPad|iPhone|iPod/.test(ua) && !/CriOS|FxiOS|EdgiOS/.test(ua)) {
     return "ios-safari";
+  }
+
+  const navAny = navigator as Navigator & { brave?: { isBrave?: () => unknown } };
+  if (typeof navAny.brave?.isBrave === "function") {
+    return "brave";
   }
 
   const isMac = /Mac/.test(ua);
@@ -73,20 +79,29 @@ export function InstallSheet({
     >
       <button
         type="button"
-        aria-label="Close"
+        aria-label="Close install guide"
         onClick={onClose}
-        className="absolute inset-0 bg-foreground/30 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-foreground/25 backdrop-blur-md"
       />
       <div
         className={cn(
           "relative w-full max-w-md overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow-float)] animate-rise-in",
         )}
       >
-        <div className="flex items-start gap-3 px-5 pt-5">
-          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-muted text-foreground">
-            <MonitorUp className="h-4 w-4" />
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface/90 text-subtle transition-colors duration-150 hover:bg-muted hover:text-foreground ring-focus"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+
+        <div className="flex items-start gap-3 px-5 pt-6">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-foreground text-background">
+            <BrandWaveIcon className="h-5 w-5" />
           </div>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 pr-8">
             <div className="text-[15px] font-semibold tracking-tight text-foreground">
               {title}
             </div>
@@ -94,14 +109,6 @@ export function InstallSheet({
               {subtitle}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-subtle transition-colors duration-150 hover:bg-muted hover:text-foreground ring-focus"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
         </div>
 
         <ol className="mt-4 space-y-2 px-5 pb-4 text-[13px] leading-6">
@@ -115,8 +122,8 @@ export function InstallSheet({
           ))}
         </ol>
 
-        {installed && onOpenInNewWindow ? (
-          <div className="border-t border-border bg-muted/30 px-5 py-3">
+        <div className="flex items-center justify-between gap-3 border-t border-border bg-muted/30 px-5 py-3">
+          {installed && onOpenInNewWindow ? (
             <button
               type="button"
               onClick={() => {
@@ -128,10 +135,32 @@ export function InstallSheet({
               Open in a new window
               <ChevronRight className="h-3 w-3" />
             </button>
-          </div>
-        ) : null}
+          ) : (
+            <span className="text-[11px] text-muted-foreground">
+              Files stay local on this device.
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium text-subtle transition-colors duration-150 hover:bg-muted hover:text-foreground ring-focus"
+          >
+            Maybe later
+          </button>
+        </div>
       </div>
     </div>
+  );
+}
+
+function BrandWaveIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" className={cn("fill-current", className)} aria-hidden>
+      <rect x="2" y="6" width="1.6" height="4" rx="0.8" />
+      <rect x="5" y="3" width="1.6" height="10" rx="0.8" />
+      <rect x="8" y="5" width="1.6" height="6" rx="0.8" />
+      <rect x="11" y="2" width="1.6" height="12" rx="0.8" />
+    </svg>
   );
 }
 
@@ -148,6 +177,12 @@ function getSteps(platform: InstallPlatform): string[] {
         "In Safari's menu bar, open File.",
         "Choose Add to Dock… and confirm.",
         "Launch Transcribble from the Dock or Applications.",
+      ];
+    case "brave":
+      return [
+        "Open the Brave menu (☰) in the top-right of the window.",
+        "Choose Install Transcribble… and confirm the prompt.",
+        "Launch it from the Dock, Taskbar, or Applications in its own window.",
       ];
     case "firefox":
       return [

@@ -25,6 +25,7 @@ import {
 import type { HelperModelProfile, LocalHelperModelAvailability } from "@/lib/transcribble/types";
 import { cn } from "@/lib/utils";
 import { buildStorageStatus } from "@/lib/transcribble/storage";
+import { describeHardwareTier, detectHardwareProfile, type HardwareProfile } from "@/lib/transcribble/hardware";
 import { ThemeToggle } from "./theme-toggle";
 import { KeyboardShortcut } from "./keyboard-shortcut";
 
@@ -114,6 +115,12 @@ export function SettingsSheet({
   const descriptionId = useId();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const [hardware, setHardware] = React.useState<HardwareProfile | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setHardware(detectHardwareProfile());
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -505,6 +512,24 @@ export function SettingsSheet({
                   {installPromptAvailable ? "Install" : "Set up"}
                 </ActionButton>
               )}
+            </Row>
+          </Block>
+
+          <Block title="Performance">
+            <Row
+              label={hardware ? `This device · ${hardware.summary}` : "This device"}
+              detail={
+                hardware
+                  ? describeHardwareTier(hardware.tier)
+                  : "Detecting hardware capabilities…"
+              }
+              ready={hardware ? hardware.tier !== "light" : undefined}
+            >
+              {hardware ? (
+                <span className="inline-flex items-center rounded-full border border-border bg-surface px-2.5 py-1 text-[11px] font-medium text-foreground/80 capitalize">
+                  {hardware.tier}
+                </span>
+              ) : null}
             </Row>
           </Block>
 
