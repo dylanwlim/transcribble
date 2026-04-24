@@ -163,6 +163,34 @@ export function TranscribbleApp() {
     setSettingsOpen(true);
   }, []);
 
+  const openDesktopApp = useCallback(async () => {
+    if (installState.installPromptAvailable) {
+      await promptInstall();
+      return;
+    }
+
+    if (typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches) {
+      setNotice({ tone: "info", message: "Transcribble is already open as the desktop app." });
+      return;
+    }
+
+    if (installState.installed && typeof window !== "undefined") {
+      window.open(window.location.origin, "_blank", "noopener,noreferrer");
+      setNotice({
+        tone: "info",
+        message:
+          "Opened Transcribble in a new window. If your browser keeps it in a tab, launch the installed app from Dock or Applications.",
+      });
+      return;
+    }
+
+    setNotice({
+      tone: "info",
+      message:
+        "This browser is not exposing the desktop app prompt yet. Use the browser install option, then launch Transcribble from Dock or Applications.",
+    });
+  }, [installState.installPromptAvailable, installState.installed, promptInstall, setNotice]);
+
   // Global shortcuts (additive — the hook already handles Space / ⌘K / / / J / K / B)
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -306,6 +334,9 @@ export function TranscribbleApp() {
         online={effectiveOnline}
         helperAvailable={helperAvailable}
         helperSummary={helperSummary}
+        desktopAppInstalled={installState.installed}
+        desktopInstallAvailable={installState.installPromptAvailable}
+        onOpenDesktopApp={() => void openDesktopApp()}
         className={className}
         headerAction={headerAction}
         showSearchShortcut={showSearchShortcut}
@@ -351,6 +382,9 @@ export function TranscribbleApp() {
               warming={warmingSetup}
               online={effectiveOnline}
               helperAvailable={helperAvailable}
+              desktopAppInstalled={installState.installed}
+              desktopInstallAvailable={installState.installPromptAvailable}
+              onOpenDesktopApp={openDesktopApp}
               supportedFormats={supportedFormats}
             />
           ) : selectedProject ? (
@@ -424,6 +458,9 @@ export function TranscribbleApp() {
               warming={warmingSetup}
               online={effectiveOnline}
               helperAvailable={helperAvailable}
+              desktopAppInstalled={installState.installed}
+              desktopInstallAvailable={installState.installPromptAvailable}
+              onOpenDesktopApp={openDesktopApp}
               supportedFormats={supportedFormats}
             />
           )}
@@ -512,6 +549,7 @@ export function TranscribbleApp() {
         helperUrl={helperCapabilities?.url ?? "http://127.0.0.1:7771"}
         helperBackendLabel={helperCapabilities?.backendLabel ?? helperCapabilities?.backend}
         helperCacheLabel={helperCacheLabel}
+        helperMaxParallelChunks={helperCapabilities?.maxParallelChunks}
         helperModels={helperCapabilities?.models ?? []}
         helperModelProfile={helperPreferences.modelProfile}
         helperPhraseHints={helperPreferences.phraseHints}

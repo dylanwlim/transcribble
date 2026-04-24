@@ -76,6 +76,9 @@ export interface LocalHelperCapabilities {
   supportsWordTimestamps?: boolean;
   supportsAlignment?: boolean;
   supportsDiarization?: boolean;
+  maxParallelChunks?: number;
+  targetChunkSeconds?: number;
+  chunkOverlapSeconds?: number;
   cacheBytes?: number;
   models: LocalHelperModelAvailability[];
   reason?: string;
@@ -111,6 +114,7 @@ export interface LocalHelperJob {
   durationSec?: number;
   backend?: string;
   backendLabel?: string;
+  maxParallelChunks?: number;
   modelProfile: HelperModelProfile;
   modelName?: string;
   modelDownloadBytes?: number;

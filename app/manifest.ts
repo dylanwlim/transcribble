@@ -4,11 +4,11 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Transcribble",
     short_name: "Transcribble",
-    description: "Private voice workspace for turning recordings into searchable, editable knowledge on this device.",
+    description: "Voice Memos-style local transcription workspace for imported recordings.",
     start_url: "/",
     display: "standalone",
-    background_color: "#efe9dc",
-    theme_color: "#13151a",
+    background_color: "#1a1a1a",
+    theme_color: "#1a1a1a",
     icons: [
       {
         src: "/icon",

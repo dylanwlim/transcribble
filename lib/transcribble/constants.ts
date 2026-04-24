@@ -40,14 +40,15 @@ export const LOCAL_ACCELERATOR_CHECK_COMMAND = "npm run helper:check";
 export const ADD_RECORDING_LABEL = "Add recording";
 export const ADD_RECORDING_HELPER = "Add a recording to begin.";
 export const IMPORT_FILE_LABEL = "Import file";
-export const SETTINGS_SIDEBAR_LABEL = "Workspace";
+export const DESKTOP_APP_LABEL = "Open desktop app";
+export const SETTINGS_SIDEBAR_LABEL = "Setup";
 export const SETTINGS_OPEN_LABEL = "Open workspace settings";
 export const SETTINGS_SECTION_LABEL = "Workspace";
 export const SETTINGS_MODAL_TITLE = "Workspace settings";
 export const EMPTY_STATE_COPY =
-  "Bring in a recording and turn it into a local transcript you can search, edit, and export on this device. Smaller jobs can stay in the browser. Long or large media routes through the local accelerator on this machine.";
+  "Drop in MP3, MP4, M4A, WAV, and other recordings. Transcribble keeps the file local, routes long media to the helper, splits it into local chunks, stitches the transcript, and gives you a clean text export.";
 export const SETTINGS_PRIVACY_COPY =
-  "Browser mode keeps recordings on this device for shorter jobs. The local accelerator also runs on this machine and is the default path for long or memory-heavy recordings.";
+  "Browser mode keeps shorter jobs on this device. The local accelerator runs on this machine for long or memory-heavy recordings, chunks the speech locally, and merges the transcript before export.";
 export const UNSUPPORTED_FILE_TYPE_MESSAGE = `Unsupported file type. Use ${formatList(
   SUPPORTED_FORMAT_LABELS,
 )}.`;

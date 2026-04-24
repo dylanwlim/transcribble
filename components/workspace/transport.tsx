@@ -4,10 +4,10 @@ import {
   Bookmark,
   Pause,
   Play,
-  Rewind,
+  RotateCcw,
+  RotateCw,
   SkipBack,
   SkipForward,
-  FastForward,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -45,14 +45,12 @@ export function Transport({
   bookmarkActive,
 }: TransportProps) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 py-2">
-      <div className="flex items-center gap-1 text-[13px] tabular text-muted-foreground">
-        <span className="text-foreground">{formatDuration(currentTime)}</span>
-        <span className="text-subtle">/</span>
-        <span>{formatDuration(duration)}</span>
+    <div className="flex flex-col items-center gap-3 py-3">
+      <div className="text-[32px] font-semibold leading-none tracking-normal text-foreground tabular sm:text-[36px]">
+        {formatDuration(currentTime)}
       </div>
 
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1.5 rounded-full border border-border bg-surface/60 px-2 py-1">
         <TransportButton
           label="Previous segment"
           shortcut="K"
@@ -62,11 +60,11 @@ export function Transport({
           <SkipBack className="h-3.5 w-3.5" />
         </TransportButton>
         <TransportButton
-          label="Back 5 seconds"
-          onClick={() => onSkip(-5)}
+          label="Back 15 seconds"
+          onClick={() => onSkip(-15)}
           disabled={disabled}
         >
-          <Rewind className="h-3.5 w-3.5" />
+          <SkipGlyph direction="back" />
         </TransportButton>
 
         <button
@@ -85,11 +83,11 @@ export function Transport({
         </button>
 
         <TransportButton
-          label="Forward 5 seconds"
-          onClick={() => onSkip(5)}
+          label="Forward 15 seconds"
+          onClick={() => onSkip(15)}
           disabled={disabled}
         >
-          <FastForward className="h-3.5 w-3.5" />
+          <SkipGlyph direction="forward" />
         </TransportButton>
         <TransportButton
           label="Next segment"
@@ -101,7 +99,8 @@ export function Transport({
         </TransportButton>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3 text-[12px] text-muted-foreground">
+        <span className="tabular">{formatDuration(duration)}</span>
         <button
           type="button"
           onClick={onToggleBookmark}
@@ -140,6 +139,16 @@ export function Transport({
         </div>
       </div>
     </div>
+  );
+}
+
+function SkipGlyph({ direction }: { direction: "back" | "forward" }) {
+  const Icon = direction === "back" ? RotateCcw : RotateCw;
+  return (
+    <span className="relative inline-flex h-5 w-5 items-center justify-center">
+      <Icon className="h-5 w-5" />
+      <span className="absolute text-[7px] font-semibold leading-none">15</span>
+    </span>
   );
 }
 

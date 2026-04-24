@@ -4,10 +4,12 @@ Transcribble is a local-first voice workspace for turning recordings into search
 
 Current public app: [transcribble-rho.vercel.app](https://transcribble-rho.vercel.app)
 
+The interface is intentionally Voice Memos-like: a quiet recording list, drag-in import for MP3/MP4/M4A/WAV-style files, a focused player and transcript view, and a direct text export path.
+
 ## Modes
 
 - Browser mode: the lightweight path for smaller, safer recordings when the browser runtime is genuinely a good fit.
-- Local accelerator mode: the default path for long or large media. It runs through the Transcribble Helper on `localhost`, uses native `ffprobe` / `ffmpeg`, and keeps the work on the same machine.
+- Local accelerator mode: the default path for long or large media. It runs through the Transcribble Helper on `localhost`, uses native `ffprobe` / `ffmpeg`, splits speech into local chunks, runs bounded chunk workers, stitches the transcript, and keeps the work on the same machine.
 
 The app does **not** default to any paid cloud transcription backend.
 
@@ -27,6 +29,7 @@ Transcribble now handles large imports honestly:
 - smaller/safe recordings stay on the browser-local path
 - long or memory-risk recordings route to the local accelerator
 - if the helper is not running, the app keeps the source file locally and says that the local accelerator is required instead of pretending the browser will continue
+- helper-backed recordings can run multiple local chunk workers when the machine can handle it; set `TRANSCRIBBLE_HELPER_CHUNK_WORKERS=1..4` before `npm run helper:start` to override the default
 
 The guaranteed path for a 1.1 GB meeting `.mp4` is the local accelerator, not `decodeAudioData()`, `AudioBuffer`, or `ffmpeg.wasm`.
 
@@ -50,6 +53,7 @@ It:
 - fails clearly when no usable audio stream exists
 - extracts mono 16 kHz speech audio with native `ffmpeg`
 - chunks long recordings with overlap
+- transcribes prepared chunks with bounded local concurrency
 - shows explicit helper-side model download progress while the first local model is being prepared
 - persists job state locally so refreshes and helper restarts can resume
 - prefers MLX Whisper on Apple Silicon when available, otherwise uses `faster-whisper`

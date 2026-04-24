@@ -308,7 +308,7 @@ export function Waveform({
       onPointerLeave={onPointerLeave}
       onKeyDown={onKeyDown}
       className={cn(
-        "group relative h-24 w-full select-none overflow-hidden rounded-md",
+        "group relative h-16 w-full select-none overflow-hidden rounded-md border border-border bg-surface/50",
         disabled ? "cursor-default opacity-60" : "cursor-pointer",
         "ring-focus",
         recording && "cursor-default",

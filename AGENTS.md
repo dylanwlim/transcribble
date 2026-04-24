@@ -31,6 +31,8 @@ Do not assume:
 - `lib/transcribble/enrichment.ts` is optional and feature-flagged. Core flows should not depend on hosted enrichments.
 - Verify Vercel before touching public URLs. Keep `README.md` and `app/layout.tsx` aligned with the live public alias, not stale defaults.
 - Helper model downloads are one-time local cache events under `~/.transcribble-helper`; UI/docs should describe them honestly and avoid claiming the model is already cached before the weight files are actually present.
+- Helper-backed long media chunks locally, can run bounded chunk workers, and stitches the transcript before export. `TRANSCRIBBLE_HELPER_CHUNK_WORKERS=1..4` overrides the default worker count before `npm run helper:start`.
+- Keep the main UI calm and Voice Memos-like: recording list, drag-in import, focused player/transcript, clear `.txt` export, and a visible desktop-app install/open affordance. Avoid bringing back dashboard-style panels unless the workflow truly needs them.
 
 Validation:
 - Docs/instruction-only edits: verify referenced files and commands exist; do not run `npm run validate` by default.

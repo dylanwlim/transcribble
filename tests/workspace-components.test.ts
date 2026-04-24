@@ -46,11 +46,15 @@ test("sidebar renders setup as a real button with the shared settings label", ()
       online: true,
       helperAvailable: false,
       helperSummary: "Large recordings need the local accelerator",
+      desktopAppInstalled: false,
+      desktopInstallAvailable: false,
+      onOpenDesktopApp: () => undefined,
     }),
   );
 
   assert.match(html, /<button[^>]*aria-label="Open workspace settings"/);
-  assert.match(html, />Workspace</);
+  assert.match(html, />Setup</);
+  assert.match(html, /Desktop app/);
   assert.match(html, /202 MB used/);
   assert.match(html, /2\.0 GB available/);
   assert.match(html, /Helper not connected/);
@@ -83,6 +87,7 @@ test("settings sheet renders the local workspace dialog heading", () => {
       helperUrl: "http://127.0.0.1:7771",
       helperBackendLabel: undefined,
       helperCacheLabel: "Model cache size unavailable",
+      helperMaxParallelChunks: 1,
       helperModels: [],
       helperModelProfile: "fast",
       helperPhraseHints: "",
@@ -106,7 +111,7 @@ test("settings sheet renders the local workspace dialog heading", () => {
   assert.match(html, new RegExp(LOCAL_ACCELERATOR_CHECK_COMMAND));
 });
 
-test("empty state copy keeps the local-first em dash copy", () => {
+test("empty state copy keeps local-first import guidance", () => {
   const html = renderToStaticMarkup(
     createElement(EmptyState, {
       onImport: () => undefined,
@@ -116,6 +121,9 @@ test("empty state copy keeps the local-first em dash copy", () => {
       warming: false,
       online: true,
       helperAvailable: false,
+      desktopAppInstalled: false,
+      desktopInstallAvailable: false,
+      onOpenDesktopApp: () => undefined,
       supportedFormats: ["MP3", "MP4", "M4A", "WAV"],
     }),
   );

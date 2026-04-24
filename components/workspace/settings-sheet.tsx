@@ -53,6 +53,7 @@ interface SettingsSheetProps {
   helperUrl: string;
   helperBackendLabel?: string;
   helperCacheLabel: string;
+  helperMaxParallelChunks?: number;
   helperModels: LocalHelperModelAvailability[];
   helperModelProfile: HelperModelProfile;
   helperPhraseHints: string;
@@ -95,6 +96,7 @@ export function SettingsSheet({
   helperUrl,
   helperBackendLabel,
   helperCacheLabel,
+  helperMaxParallelChunks,
   helperModels,
   helperModelProfile,
   helperPhraseHints,
@@ -345,6 +347,16 @@ export function SettingsSheet({
             <Row
               label="Backend and cache"
               detail={`${helperBackendLabel ?? "Waiting for helper"} · ${helperCacheLabel}`}
+              ready={helperAvailable}
+            />
+
+            <Row
+              label="Chunk workers"
+              detail={
+                helperAvailable
+                  ? `Runs up to ${helperMaxParallelChunks ?? 1} local chunk${(helperMaxParallelChunks ?? 1) === 1 ? "" : "s"} at a time, then stitches the transcript.`
+                  : "Available after the helper starts."
+              }
               ready={helperAvailable}
             />
 

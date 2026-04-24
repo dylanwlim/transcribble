@@ -74,7 +74,7 @@ const STAGE_COPY: Record<ProjectStep, StageCopy> = {
   transcribing: {
     badgeLabel: "Working",
     headline: "Transcribing now",
-    summary: "Building the transcript now.",
+    summary: "Running local transcription chunks and saving each finished part.",
     tone: "working",
   },
   merging: {

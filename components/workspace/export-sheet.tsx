@@ -21,7 +21,7 @@ const FORMATS: {
   label: string;
   description: string;
 }[] = [
-  { value: "txt", label: "Plain text", description: "Clean prose, no timestamps." },
+  { value: "txt", label: "Text transcript", description: "Clean .txt output, no timestamps." },
   { value: "md", label: "Markdown", description: "Structured with bookmarks and ranges." },
   { value: "srt", label: "SubRip (.srt)", description: "Captioning subtitles." },
   { value: "vtt", label: "WebVTT (.vtt)", description: "Web-native captions." },

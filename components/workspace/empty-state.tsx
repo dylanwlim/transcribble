@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, ShieldCheck, Upload } from "lucide-react";
+import { Download, MonitorUp, ShieldCheck, Upload } from "lucide-react";
 import React from "react";
 
 import {
@@ -18,6 +18,9 @@ interface EmptyStateProps {
   warming: boolean;
   online: boolean;
   helperAvailable: boolean;
+  desktopAppInstalled: boolean;
+  desktopInstallAvailable: boolean;
+  onOpenDesktopApp: () => void | Promise<void>;
   supportedFormats: string[];
 }
 
@@ -29,6 +32,9 @@ export function EmptyState({
   warming,
   online,
   helperAvailable,
+  desktopAppInstalled,
+  desktopInstallAvailable,
+  onOpenDesktopApp,
   supportedFormats,
 }: EmptyStateProps) {
   const supportedFormatsSummary =
@@ -55,7 +61,7 @@ export function EmptyState({
           {EMPTY_STATE_COPY}
         </p>
 
-        <div className="workspace-empty-actions mt-7 w-full gap-3">
+        <div className="workspace-empty-actions mt-7 w-full gap-2.5">
           <button
             type="button"
             onClick={onImport}
@@ -72,6 +78,22 @@ export function EmptyState({
               className="workspace-empty-shortcut ml-1"
               keyClassName="border-background/30 bg-background/10 text-background/85"
             />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void onOpenDesktopApp()}
+            className={cn(
+              "inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-border bg-surface px-5 py-2 text-[13px] font-medium text-foreground",
+              "whitespace-nowrap transition-colors duration-150 hover:bg-muted ring-focus",
+            )}
+          >
+            <MonitorUp className="h-3.5 w-3.5" />
+            {desktopAppInstalled
+              ? "Open app"
+              : desktopInstallAvailable
+                ? "Install app"
+                : "Desktop app"}
           </button>
 
           {!setupReady ? (
@@ -110,7 +132,7 @@ export function EmptyState({
           </div>
           <div className="workspace-empty-meta-group">
             {helperAvailable
-              ? "Long recordings use the local accelerator"
+              ? "Long recordings chunk locally"
               : "Long recordings need the local accelerator"}
           </div>
         </div>

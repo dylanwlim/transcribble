@@ -55,7 +55,7 @@ if (!capabilities.available) {
 }
 
 console.log(
-  `${prefix} ready: ffmpeg=${capabilities.ffmpegReady ? "yes" : "no"} ffprobe=${capabilities.ffprobeReady ? "yes" : "no"} models=${(capabilities.models ?? []).length}`,
+  `${prefix} ready: ffmpeg=${capabilities.ffmpegReady ? "yes" : "no"} ffprobe=${capabilities.ffprobeReady ? "yes" : "no"} models=${(capabilities.models ?? []).length} chunkWorkers=${capabilities.maxParallelChunks ?? 1}`,
 );
 
 for (const model of capabilities.models ?? []) {

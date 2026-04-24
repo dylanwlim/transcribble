@@ -161,9 +161,37 @@ export function Stage(props: StageProps) {
   );
 
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col">
-      <header className="flex items-center justify-between gap-3 border-b border-border px-6 py-3">
-        <div className="min-w-0 flex-1">
+    <div className="flex h-full min-w-0 flex-1 flex-col bg-background">
+      <header className="grid grid-cols-1 items-center gap-3 border-b border-border px-4 py-3 sm:grid-cols-[1fr_minmax(0,22rem)_1fr] sm:px-6">
+        <div className="min-w-0 order-2 sm:order-1">
+          <div className="flex items-center gap-1 rounded-full border border-border bg-surface/70 p-1">
+            {canExport ? (
+              <HeaderAction
+                label="Copy transcript"
+                onClick={onCopy}
+                icon={<Copy className="h-3.5 w-3.5" />}
+                badge={copied ? "Copied" : undefined}
+              />
+            ) : null}
+            {canExport ? (
+              <HeaderAction
+                label="Download transcript"
+                shortcut="⌘E"
+                onClick={onExport}
+                icon={<Download className="h-3.5 w-3.5" />}
+              />
+            ) : null}
+            {isError ? (
+              <HeaderAction
+                label="Try again"
+                onClick={onRetry}
+                icon={<RotateCw className="h-3.5 w-3.5" />}
+              />
+            ) : null}
+          </div>
+        </div>
+
+        <div className="min-w-0 text-center order-1 sm:order-2">
           <input
             aria-label="Session title"
             value={titleDraft}
@@ -186,12 +214,12 @@ export function Stage(props: StageProps) {
               }
             }}
             className={cn(
-              "w-full truncate bg-transparent text-[17px] font-semibold tracking-tight text-foreground outline-none",
+              "w-full truncate bg-transparent text-center text-[17px] font-semibold tracking-tight text-foreground outline-none",
               "rounded px-1 -mx-1 transition-colors duration-150",
               titleFocused ? "bg-muted/60" : "",
             )}
           />
-          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-subtle tabular">
+          <div className="mt-0.5 flex min-w-0 items-center justify-center gap-1.5 text-[11px] text-subtle tabular">
             <span>{formatDate(project.createdAt)}</span>
             <span className="text-border-strong">·</span>
             <span>{formatDuration(duration)}</span>
@@ -202,30 +230,7 @@ export function Stage(props: StageProps) {
           </div>
         </div>
 
-        <div className="flex items-center gap-1">
-          {canExport ? (
-            <HeaderAction
-              label="Copy transcript"
-              onClick={onCopy}
-              icon={<Copy className="h-3.5 w-3.5" />}
-              badge={copied ? "Copied" : undefined}
-            />
-          ) : null}
-          {canExport ? (
-            <HeaderAction
-              label="Export"
-              shortcut="⌘E"
-              onClick={onExport}
-              icon={<Download className="h-3.5 w-3.5" />}
-            />
-          ) : null}
-          {isError ? (
-            <HeaderAction
-              label="Try again"
-              onClick={onRetry}
-              icon={<RotateCw className="h-3.5 w-3.5" />}
-            />
-          ) : null}
+        <div className="order-3 flex items-center justify-center gap-1 sm:justify-end">
           {isError ? (
             <HeaderAction
               label="Remove"
@@ -319,8 +324,32 @@ export function Stage(props: StageProps) {
         </div>
       ) : null}
 
-      <div className="border-b border-border px-6 pb-3 pt-4">
-        {/* Media surface */}
+      <div className="min-h-0 flex-1 px-6 pt-4">
+        <TranscriptPane
+          project={project}
+          segments={segments}
+          turns={turns}
+          focusedSegmentId={focusedSegmentId}
+          playbackSegmentId={playbackSegmentId}
+          marks={marks}
+          matchedSegmentIds={matchedSegmentIds}
+          transcriptQuery={transcriptQuery}
+          onTranscriptQueryChange={onTranscriptQueryChange}
+          onSelectSegment={onSelectSegment}
+          onUpdateSegmentText={onUpdateSegmentText}
+          onToggleBookmark={onToggleBookmark}
+          onJumpMatch={onJumpMatch}
+          transcriptSearchRef={transcriptSearchRef}
+          partialTranscript={partialTranscript}
+          canSearch={canSearch}
+          canEdit={canEdit}
+          onBookmarkSegment={onBookmarkSegment}
+          onSaveRange={onSaveRange}
+          onRevertSegment={onRevertSegment}
+        />
+      </div>
+
+      <div className="border-t border-border bg-background/95 px-6 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur">
         {mediaUrl && project.mediaKind === "video" ? (
           <div className="mb-3 overflow-hidden rounded-lg bg-black">
             <video
@@ -330,7 +359,7 @@ export function Stage(props: StageProps) {
               onTimeUpdate={mediaHandlers.onTimeUpdate}
               onPlay={mediaHandlers.onPlay}
               onPause={mediaHandlers.onPause}
-              className="mx-auto block max-h-[38vh] w-full object-contain"
+              className="mx-auto block max-h-36 w-full object-contain"
               controls={false}
             />
           </div>
@@ -378,31 +407,6 @@ export function Stage(props: StageProps) {
           onChangeRate={setPlaybackRate}
           onToggleBookmark={onToggleBookmark}
           bookmarkActive={bookmarkActive}
-        />
-      </div>
-
-      <div className="min-h-0 flex-1 px-6 pt-3">
-        <TranscriptPane
-          project={project}
-          segments={segments}
-          turns={turns}
-          focusedSegmentId={focusedSegmentId}
-          playbackSegmentId={playbackSegmentId}
-          marks={marks}
-          matchedSegmentIds={matchedSegmentIds}
-          transcriptQuery={transcriptQuery}
-          onTranscriptQueryChange={onTranscriptQueryChange}
-          onSelectSegment={onSelectSegment}
-          onUpdateSegmentText={onUpdateSegmentText}
-          onToggleBookmark={onToggleBookmark}
-          onJumpMatch={onJumpMatch}
-          transcriptSearchRef={transcriptSearchRef}
-          partialTranscript={partialTranscript}
-          canSearch={canSearch}
-          canEdit={canEdit}
-          onBookmarkSegment={onBookmarkSegment}
-          onSaveRange={onSaveRange}
-          onRevertSegment={onRevertSegment}
         />
       </div>
     </div>

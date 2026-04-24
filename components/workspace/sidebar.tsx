@@ -8,6 +8,7 @@ import {
   HardDrive,
   Mic,
   MoreHorizontal,
+  MonitorUp,
   Pencil,
   Pin,
   PinOff,
@@ -62,6 +63,9 @@ interface SidebarProps {
   online: boolean;
   helperAvailable: boolean;
   helperSummary: string;
+  desktopAppInstalled: boolean;
+  desktopInstallAvailable: boolean;
+  onOpenDesktopApp: () => void | Promise<void>;
   className?: string;
   headerAction?: React.ReactNode;
   showSearchShortcut?: boolean;
@@ -213,7 +217,7 @@ function ProjectRow({
       }}
       className={cn(
         "group relative rounded-lg transition-colors duration-150",
-        selected ? "bg-muted/80" : "hover:bg-muted/50",
+        selected ? "bg-primary text-primary-foreground" : "hover:bg-muted/50",
         dropHint === "before" && "shadow-[inset_0_2px_0_0_hsl(var(--primary))]",
         dropHint === "after" && "shadow-[inset_0_-2px_0_0_hsl(var(--primary))]",
       )}
@@ -240,10 +244,18 @@ function ProjectRow({
                     setRenaming(false);
                   }
                 }}
-                className="w-full rounded bg-transparent text-sm font-medium leading-tight text-foreground outline-none ring-focus"
+                className={cn(
+                  "w-full rounded bg-transparent text-sm font-medium leading-tight outline-none ring-focus",
+                  selected ? "text-primary-foreground" : "text-foreground",
+                )}
                 aria-label="Rename recording"
               />
-              <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-subtle tabular">
+              <div
+                className={cn(
+                  "mt-0.5 flex items-center gap-1.5 text-[11px] tabular",
+                  selected ? "text-primary-foreground/75" : "text-subtle",
+                )}
+              >
                 <span>{formatDate(project.updatedAt)}</span>
                 {duration > 0 ? (
                   <>
@@ -271,11 +283,21 @@ function ProjectRow({
                 {project.pinned ? (
                   <Pin className="h-3 w-3 shrink-0 text-subtle" aria-label="Pinned" />
                 ) : null}
-                <div className="truncate text-sm font-medium leading-tight text-foreground">
+                <div
+                  className={cn(
+                    "truncate text-sm font-semibold leading-tight",
+                    selected ? "text-primary-foreground" : "text-foreground",
+                  )}
+                >
                   {project.title}
                 </div>
               </div>
-              <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-subtle tabular">
+              <div
+                className={cn(
+                  "mt-0.5 flex items-center gap-1.5 text-[11px] tabular",
+                  selected ? "text-primary-foreground/75" : "text-subtle",
+                )}
+              >
                 <span>{formatDate(project.updatedAt)}</span>
                 {duration > 0 ? (
                   <>
@@ -453,6 +475,9 @@ export function Sidebar({
   online,
   helperAvailable,
   helperSummary,
+  desktopAppInstalled,
+  desktopInstallAvailable,
+  onOpenDesktopApp,
   className,
   headerAction,
   showSearchShortcut = true,
@@ -464,9 +489,14 @@ export function Sidebar({
       active: projects.filter(
         (p) =>
           p.status === "queued" ||
+          p.status === "pending-upload" ||
+          p.status === "uploading" ||
           p.status === "preparing" ||
           p.status === "loading-model" ||
-          p.status === "transcribing",
+          p.status === "extracting-audio" ||
+          p.status === "chunking" ||
+          p.status === "transcribing" ||
+          p.status === "merging",
       ),
       ready: projects.filter((p) => p.status === "ready" || p.status === "error" || p.status === "paused"),
     }),
@@ -494,21 +524,36 @@ export function Sidebar({
         : "Go online once so this browser can cache its local tools.";
   const storageLine = [storageSummary.usedLabel, storageSummary.availableLabel].filter(Boolean).join(" · ");
 
+  const desktopLabel = desktopAppInstalled
+    ? "Open app"
+    : desktopInstallAvailable
+      ? "Install app"
+      : "Desktop app";
+
   return (
     <aside className={cn("flex h-full min-h-0 w-full flex-col border-r border-border bg-surface", className)}>
-      <div className="flex items-center justify-between gap-3 px-4 pb-1 pt-5">
-        <div className="flex items-center gap-2">
-          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-foreground text-background">
-            <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 fill-current">
-              <rect x="2" y="6" width="1.6" height="4" rx="0.8" />
-              <rect x="5" y="3" width="1.6" height="10" rx="0.8" />
-              <rect x="8" y="5" width="1.6" height="6" rx="0.8" />
-              <rect x="11" y="2" width="1.6" height="12" rx="0.8" />
-            </svg>
+      <div className="flex items-center justify-between gap-3 px-4 pb-1 pt-4">
+        <div className="min-w-0">
+          <div className="truncate text-[16px] font-semibold tracking-tight text-foreground">
+            All Recordings
           </div>
-          <span className="text-[13px] font-semibold tracking-tight">Transcribble</span>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">
+            Local transcripts
+          </div>
         </div>
-        {headerAction}
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => void onOpenDesktopApp()}
+            title={desktopLabel}
+            aria-label={desktopLabel}
+            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 text-[11px] font-medium text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground ring-focus"
+          >
+            <MonitorUp className="h-3.5 w-3.5" />
+            <span className="hidden min-[380px]:inline">{desktopLabel}</span>
+          </button>
+          {headerAction}
+        </div>
       </div>
 
       <div className="px-4 pt-4">

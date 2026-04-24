@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import concurrent.futures
 import importlib.util
 import json
 import os
@@ -34,6 +35,7 @@ DEFAULT_CHUNK_SEC = 8 * 60
 MIN_CHUNK_SEC = 90
 CHUNK_OVERLAP_SEC = 2
 MODEL_DOWNLOAD_POLL_INTERVAL_SEC = 0.5
+MAX_CONFIGURED_CHUNK_WORKERS = 4
 
 os.environ.setdefault("HF_HOME", str(HF_CACHE_DIR))
 
@@ -266,6 +268,9 @@ def capabilities_payload() -> dict[str, Any]:
         "supportsWordTimestamps": backend in {"mlx-whisper", "faster-whisper", "stub"},
         "supportsAlignment": False,
         "supportsDiarization": False,
+        "maxParallelChunks": max_parallel_chunks(backend),
+        "targetChunkSeconds": DEFAULT_CHUNK_SEC,
+        "chunkOverlapSeconds": CHUNK_OVERLAP_SEC,
         "cacheBytes": helper_cache_usage(),
         "models": models,
         "reason": reason,
@@ -335,6 +340,38 @@ def compute_device() -> tuple[str, str]:
         return "cuda", "int8_float16"
 
     return "cpu", "int8"
+
+
+def parse_worker_count(value: str | None) -> int | None:
+    if not value:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None
+    return max(1, min(MAX_CONFIGURED_CHUNK_WORKERS, parsed))
+
+
+def default_chunk_workers(backend: str | None) -> int:
+    cpu_count = os.cpu_count() or 1
+    if backend == "stub":
+        return max(1, min(MAX_CONFIGURED_CHUNK_WORKERS, cpu_count))
+
+    # Local Whisper backends are memory hungry, so concurrency stays bounded.
+    # Set TRANSCRIBBLE_HELPER_CHUNK_WORKERS=1..4 to override this default.
+    if backend in {"mlx-whisper", "faster-whisper"}:
+        if backend == "faster-whisper" and compute_device()[0] == "cuda":
+            return 1
+        return 2 if cpu_count >= 6 else 1
+
+    return 1
+
+
+def max_parallel_chunks(backend: str | None = None) -> int:
+    configured = parse_worker_count(os.environ.get("TRANSCRIBBLE_HELPER_CHUNK_WORKERS"))
+    if configured is not None:
+        return configured
+    return default_chunk_workers(backend or preferred_backend())
 
 
 @dataclass
@@ -508,6 +545,7 @@ class JobStore:
                 "updatedAt": utc_now(),
                 "backend": preferred_backend(),
                 "backendLabel": backend_label(preferred_backend()),
+                "maxParallelChunks": max_parallel_chunks(preferred_backend()),
                 "modelProfile": payload.get("modelProfile", "fast"),
                 "modelName": None,
                 "modelDownloadBytes": 0,
@@ -681,68 +719,104 @@ class JobStore:
 
         chunk_results = {item["chunkIndex"]: item for item in (self.load(job_id).get("chunkResults") or [])}
         chunks_dir = ensure_dir(self.job_dir(job_id) / "chunks")
+        missing_plans = [plan for plan in plans if plan.chunk_index not in chunk_results]
+        prepared_chunks: list[tuple[ChunkPlan, Path]] = []
 
-        for index, plan in enumerate(plans):
+        for index, plan in enumerate(missing_plans):
             self._raise_if_canceled(job_id)
-            if plan.chunk_index in chunk_results:
-                continue
 
             self.update_job_status(
                 job_id,
                 "extracting_audio",
-                15 + round((index / max(1, len(plans))) * 10),
-                f"Extracting speech audio for chunk {index + 1} of {len(plans)}.",
+                18 + round((index / max(1, len(missing_plans))) * 12),
+                f"Extracting speech audio for chunk {plan.chunk_index + 1} of {len(plans)}.",
             )
             chunk_path = chunks_dir / f"chunk-{plan.chunk_index:04d}.wav"
-            extract_chunk(source_path, chunk_path, audio_stream_index, plan)
+            if not chunk_path.exists():
+                extract_chunk(source_path, chunk_path, audio_stream_index, plan)
             self._raise_if_canceled(job_id)
+            prepared_chunks.append((plan, chunk_path))
 
+        if prepared_chunks:
+            backend = self.load(job_id).get("backend") or preferred_backend()
+            worker_count = min(max_parallel_chunks(backend), len(prepared_chunks))
             self.update_job_status(
                 job_id,
                 "transcribing",
-                28 + round((index / max(1, len(plans))) * 58),
-                f"Transcribing chunk {index + 1} of {len(plans)} locally.",
+                32,
+                (
+                    f"Transcribing {len(prepared_chunks)} local chunk"
+                    f"{'s' if len(prepared_chunks) != 1 else ''}"
+                    f"{f' with up to {worker_count} workers' if worker_count > 1 else ''}."
+                ),
             )
-            payload, backend, model_name = transcribe_chunk(
-                job_id,
-                chunk_path,
-                self.load(job_id).get("modelProfile", "fast"),
-                self.load(job_id).get("phraseHints") or [],
-            )
-            self._raise_if_canceled(job_id)
-            try:
-                chunk_path.unlink(missing_ok=True)
-            except OSError:
-                pass
 
-            chunk_record = {
-                "chunkIndex": plan.chunk_index,
-                "startMs": plan.start_ms,
-                "endMs": plan.end_ms,
-                "primaryStartMs": plan.primary_start_ms,
-                "primaryEndMs": plan.primary_end_ms,
-                "payload": payload,
-            }
-            chunk_results[plan.chunk_index] = chunk_record
-
-            completed = sorted(chunk_results)
-            self.update(
-                job_id,
-                lambda current: {
-                    **current,
-                    "backend": backend,
-                    "backendLabel": backend_label(backend),
-                    "modelName": model_name,
-                    "chunkResults": [chunk_results[key] for key in completed],
-                    "completedChunks": len(completed),
-                    "resume": {
-                        "totalChunks": len(plans),
-                        "completedChunks": len(completed),
-                        "completedChunkIndexes": completed,
-                        "nextChunkIndex": next((plan.chunk_index for plan in plans if plan.chunk_index not in chunk_results), None),
+            def transcribe_prepared_chunk(plan: ChunkPlan, chunk_path: Path) -> tuple[dict[str, Any], str, str, dict[str, Any]]:
+                self._raise_if_canceled(job_id)
+                current_job = self.load(job_id)
+                payload, backend_name, model_name = transcribe_chunk(
+                    job_id,
+                    chunk_path,
+                    current_job.get("modelProfile", "fast"),
+                    current_job.get("phraseHints") or [],
+                )
+                self._raise_if_canceled(job_id)
+                return (
+                    {
+                        "chunkIndex": plan.chunk_index,
+                        "startMs": plan.start_ms,
+                        "endMs": plan.end_ms,
+                        "primaryStartMs": plan.primary_start_ms,
+                        "primaryEndMs": plan.primary_end_ms,
+                        "payload": payload,
                     },
-                },
-            )
+                    backend_name,
+                    model_name,
+                    {"path": chunk_path},
+                )
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = {
+                    executor.submit(transcribe_prepared_chunk, plan, chunk_path): (plan, chunk_path)
+                    for plan, chunk_path in prepared_chunks
+                }
+
+                for future in concurrent.futures.as_completed(futures):
+                    chunk_record, backend_name, model_name, meta = future.result()
+                    chunk_results[chunk_record["chunkIndex"]] = chunk_record
+                    try:
+                        meta["path"].unlink(missing_ok=True)
+                    except OSError:
+                        pass
+
+                    completed = sorted(chunk_results)
+                    progress = 34 + round((len(completed) / max(1, len(plans))) * 58)
+                    detail = (
+                        f"Transcribing chunks locally: {len(completed)} of {len(plans)} complete."
+                        if worker_count > 1
+                        else f"Transcribing chunk {len(completed)} of {len(plans)} locally."
+                    )
+                    self.update(
+                        job_id,
+                        lambda current: {
+                            **current,
+                            "status": "transcribing",
+                            "progress": min(94, progress),
+                            "detail": detail,
+                            "backend": backend_name,
+                            "backendLabel": backend_label(backend_name),
+                            "maxParallelChunks": worker_count,
+                            "modelName": model_name,
+                            "chunkResults": [chunk_results[key] for key in completed],
+                            "completedChunks": len(completed),
+                            "resume": {
+                                "totalChunks": len(plans),
+                                "completedChunks": len(completed),
+                                "completedChunkIndexes": completed,
+                                "nextChunkIndex": next((plan.chunk_index for plan in plans if plan.chunk_index not in chunk_results), None),
+                            },
+                        },
+                    )
 
         self._raise_if_canceled(job_id)
         self.update_job_status(job_id, "merging", 96, "Merging the local chunk transcripts.")
@@ -984,6 +1058,7 @@ def extract_chunk(source_path: Path, output_path: Path, audio_stream_index: int,
 
 
 _MODEL_CACHE: dict[tuple[str, str], Any] = {}
+_MODEL_CACHE_LOCK = threading.Lock()
 
 
 def transcribe_chunk(
@@ -1036,15 +1111,16 @@ def transcribe_with_faster_whisper(chunk_path: Path, profile: str, phrase_hints:
     device, compute_type = compute_device()
     model_name = faster_model_name(profile)
     cache_key = (model_name, f"{device}:{compute_type}")
-    model = _MODEL_CACHE.get(cache_key)
-    if model is None:
-        model = WhisperModel(
-            model_name,
-            device=device,
-            compute_type=compute_type,
-            download_root=str(ensure_dir(MODELS_DIR / "faster-whisper")),
-        )
-        _MODEL_CACHE[cache_key] = model
+    with _MODEL_CACHE_LOCK:
+        model = _MODEL_CACHE.get(cache_key)
+        if model is None:
+            model = WhisperModel(
+                model_name,
+                device=device,
+                compute_type=compute_type,
+                download_root=str(ensure_dir(MODELS_DIR / "faster-whisper")),
+            )
+            _MODEL_CACHE[cache_key] = model
 
     segments, info = model.transcribe(
         str(chunk_path),

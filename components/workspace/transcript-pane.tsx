@@ -162,7 +162,7 @@ function SegmentRow({
   const isEdited = Boolean(segment.originalText) && segment.originalText !== segment.text;
 
   return (
-    <div className="group flex items-start gap-3 py-1.5">
+    <div className="group flex items-start gap-4 py-1">
       <button
         type="button"
         onClick={() => onSelect(true)}
@@ -179,9 +179,9 @@ function SegmentRow({
 
       <div
         className={cn(
-          "relative min-w-0 flex-1 overflow-hidden rounded-xl border border-transparent px-3 py-2",
+          "relative min-w-0 flex-1 overflow-hidden rounded-md border border-transparent px-2 py-1.5",
           "transition-colors duration-150",
-          isFocused && "border-primary/20 bg-muted/70",
+          isFocused && "border-primary/20 bg-muted/50",
           isPlaying && "border-primary/20 bg-primary/5 ring-1 ring-inset ring-primary/20",
           isMatched && !isPlaying && "bg-primary/[0.04]",
         )}
@@ -218,7 +218,7 @@ function SegmentRow({
             }}
             rows={Math.max(1, Math.ceil(draft.length / 80))}
             className={cn(
-              "w-full resize-none bg-transparent text-[15px] leading-7 text-foreground outline-none",
+              "w-full resize-none bg-transparent text-[15px] font-medium leading-7 text-foreground outline-none",
               "ring-focus",
             )}
           />
@@ -228,8 +228,8 @@ function SegmentRow({
             onClick={() => onSelect(true)}
             onDoubleClick={() => canEdit && setEditing(true)}
             className={cn(
-              "block w-full break-words rounded text-left text-[15px] leading-7",
-              "text-foreground/90 transition-colors duration-150",
+              "block w-full break-words rounded text-left text-[15px] font-medium leading-7",
+              "text-foreground/80 transition-colors duration-150",
               "hover:text-foreground ring-focus",
             )}
           >
@@ -535,7 +535,7 @@ export function TranscriptPane({
         aria-label="Transcript"
       >
         {hasSegments ? (
-          <div className="space-y-5">
+          <div className="mx-auto max-w-4xl space-y-5">
             {grouped.map(({ turn, segments: bucket }) => (
               <div key={turn.id} className="space-y-1">
                 <TurnHeader turn={turn} />
