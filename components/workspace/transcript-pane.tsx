@@ -107,7 +107,9 @@ function TurnHeader({ turn }: { turn: TranscriptTurn }) {
   );
 }
 
-function SegmentRow({
+const EMPTY_MARKS: TranscriptMark[] = [];
+
+const SegmentRow = React.memo(function SegmentRow({
   segment,
   isFocused,
   isPlaying,
@@ -125,9 +127,9 @@ function SegmentRow({
   isMatched: boolean;
   marks: TranscriptMark[];
   transcriptQuery: string;
-  onSelect: (autoplay?: boolean) => void;
+  onSelect: (segmentId: string, autoplay?: boolean) => void;
   onUpdate: (text: string) => void;
-  onRevert?: () => void;
+  onRevert?: (segmentId: string) => void;
   canEdit: boolean;
 }) {
   const [editing, setEditing] = useState(false);
@@ -165,7 +167,7 @@ function SegmentRow({
     <div className="group flex items-start gap-4 py-1">
       <button
         type="button"
-        onClick={() => onSelect(true)}
+        onClick={() => onSelect(segment.id, true)}
         className={cn(
           "w-14 shrink-0 pt-1 text-right text-[11px] tabular mono",
           "text-subtle transition-colors duration-150 hover:text-foreground",
@@ -225,7 +227,7 @@ function SegmentRow({
         ) : (
           <button
             type="button"
-            onClick={() => onSelect(true)}
+            onClick={() => onSelect(segment.id, true)}
             onDoubleClick={() => canEdit && setEditing(true)}
             className={cn(
               "block w-full break-words rounded text-left text-[15px] font-medium leading-7",
@@ -255,7 +257,7 @@ function SegmentRow({
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
-                  onRevert?.();
+                  onRevert?.(segment.id);
                 }}
                 title={`Original: ${segment.originalText}`}
                 className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-subtle hover:bg-muted hover:text-foreground ring-focus"
@@ -269,7 +271,7 @@ function SegmentRow({
       </div>
     </div>
   );
-}
+});
 
 export function TranscriptPane({
   project,
@@ -547,11 +549,11 @@ export function TranscriptPane({
                         isFocused={focusedSegmentId === segment.id}
                         isPlaying={playbackSegmentId === segment.id}
                         isMatched={matchedSegmentIds.has(segment.id)}
-                        marks={marksBySegment.get(segment.id) ?? []}
+                        marks={marksBySegment.get(segment.id) ?? EMPTY_MARKS}
                         transcriptQuery={transcriptQuery}
-                        onSelect={(autoplay) => onSelectSegment(segment.id, autoplay)}
+                        onSelect={onSelectSegment}
                         onUpdate={onUpdateSegmentText}
-                        onRevert={onRevertSegment ? () => onRevertSegment(segment.id) : undefined}
+                        onRevert={onRevertSegment}
                         canEdit={canEdit}
                       />
                     </div>

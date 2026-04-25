@@ -28,6 +28,34 @@ interface WaveformProps {
 const BAR_WIDTH = 3;
 const BAR_GAP = 2;
 
+interface ThemeColors {
+  foreground: string;
+  subtle: string;
+  primary: string;
+  recordColor: string;
+  border: string;
+}
+
+const FALLBACK_THEME: ThemeColors = {
+  foreground: "222 14% 10%",
+  subtle: "225 6% 58%",
+  primary: "222 88% 55%",
+  recordColor: "358 80% 56%",
+  border: "225 14% 89%",
+};
+
+function readThemeColors(): ThemeColors {
+  if (typeof window === "undefined") return FALLBACK_THEME;
+  const styles = getComputedStyle(document.documentElement);
+  return {
+    foreground: styles.getPropertyValue("--foreground").trim() || FALLBACK_THEME.foreground,
+    subtle: styles.getPropertyValue("--subtle").trim() || FALLBACK_THEME.subtle,
+    primary: styles.getPropertyValue("--primary").trim() || FALLBACK_THEME.primary,
+    recordColor: styles.getPropertyValue("--record").trim() || FALLBACK_THEME.recordColor,
+    border: styles.getPropertyValue("--border").trim() || FALLBACK_THEME.border,
+  };
+}
+
 function hashSeed(input: string) {
   let seed = 0;
   for (let i = 0; i < input.length; i += 1) {
@@ -138,6 +166,18 @@ export function Waveform({
     return () => observer.disconnect();
   }, []);
 
+  const [themeColors, setThemeColors] = useState(() => readThemeColors());
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setThemeColors(readThemeColors());
+    const observer = new MutationObserver(() => setThemeColors(readThemeColors()));
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "style"],
+    });
+    return () => observer.disconnect();
+  }, []);
+
   const totalBars = Math.max(16, Math.floor(width / (BAR_WIDTH + BAR_GAP)));
 
   const envelope = useMemo(
@@ -169,12 +209,7 @@ export function Waveform({
     const offsetX = (width - totalLength) / 2;
     const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
 
-    const color = getComputedStyle(document.documentElement);
-    const foreground = color.getPropertyValue("--foreground").trim() || "222 14% 10%";
-    const subtle = color.getPropertyValue("--subtle").trim() || "225 6% 58%";
-    const primary = color.getPropertyValue("--primary").trim() || "222 88% 55%";
-    const recordColor = color.getPropertyValue("--record").trim() || "358 80% 56%";
-    const border = color.getPropertyValue("--border").trim() || "225 14% 89%";
+    const { foreground, subtle, primary, recordColor, border } = themeColors;
 
     for (let i = 0; i < effectiveBars; i += 1) {
       const v = envelope[i];
@@ -237,6 +272,7 @@ export function Waveform({
     ranges,
     recording,
     hoverX,
+    themeColors,
   ]);
 
   const timeFromClientX = useCallback(
