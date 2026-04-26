@@ -1,0 +1,332 @@
+name: Discord Events
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft, closed]
+  issues:
+    types: [opened, edited, closed, reopened, assigned, labeled, unlabeled]
+  issue_comment:
+    types: [created, edited, deleted]
+  create:
+  delete:
+  deployment_status:
+  release:
+    types: [published, edited, deleted]
+  discussion:
+    types: [created, edited, deleted, answered, unanswered, pinned, unpinned, labeled, unlabeled, locked, unlocked, category_changed]
+  discussion_comment:
+    types: [created, edited, deleted]
+  fork:
+  watch:
+    types: [started]
+  public:
+
+permissions:
+  contents: read
+
+jobs:
+  notify-discord:
+    name: Send Discord notification
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DISCORD_WEBHOOK_DEPLOYMENTS: ${{ secrets.DISCORD_WEBHOOK_DEPLOYMENTS }}
+      DISCORD_WEBHOOK_PUSH_PR: ${{ secrets.DISCORD_WEBHOOK_PUSH_PR }}
+      DISCORD_WEBHOOK_BRANCHES: ${{ secrets.DISCORD_WEBHOOK_BRANCHES }}
+      DISCORD_WEBHOOK_ISSUES: ${{ secrets.DISCORD_WEBHOOK_ISSUES }}
+      DISCORD_WEBHOOK_OTHER: ${{ secrets.DISCORD_WEBHOOK_OTHER }}
+
+    steps:
+      - name: Send Discord notification
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+          const https = require("https");
+
+          const eventName = process.env.GITHUB_EVENT_NAME || "unknown";
+          const eventPath = process.env.GITHUB_EVENT_PATH;
+          const payload = eventPath ? JSON.parse(fs.readFileSync(eventPath, "utf8")) : {};
+          const serverUrl = process.env.GITHUB_SERVER_URL || "https://github.com";
+          const repo = payload.repository?.full_name || process.env.GITHUB_REPOSITORY || "unknown/repository";
+          const repoUrl = payload.repository?.html_url || `${serverUrl}/${repo}`;
+          const actor = payload.sender?.login || process.env.GITHUB_ACTOR || "unknown";
+          const action = payload.action || "";
+          const runUrl = `${serverUrl}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+
+          const routes = {
+            deployments: { secretName: "DISCORD_WEBHOOK_DEPLOYMENTS", color: 0x3498db },
+            pushPr: { secretName: "DISCORD_WEBHOOK_PUSH_PR", color: 0x5865f2 },
+            branches: { secretName: "DISCORD_WEBHOOK_BRANCHES", color: 0xf1c40f },
+            issues: { secretName: "DISCORD_WEBHOOK_ISSUES", color: 0xe67e22 },
+            other: { secretName: "DISCORD_WEBHOOK_OTHER", color: 0x95a5a6 },
+          };
+
+          function routeFor(name) {
+            if (name === "deployment_status") return routes.deployments;
+            if (name === "push" || name === "pull_request") return routes.pushPr;
+            if (name === "create" || name === "delete") return routes.branches;
+            if (name === "issues" || name === "issue_comment") return routes.issues;
+            return routes.other;
+          }
+
+          const route = routeFor(eventName);
+          const webhook = process.env[route.secretName] || "";
+
+          if (!webhook.trim()) {
+            console.log(`${route.secretName} is not configured; skipping Discord notification.`);
+            process.exit(0);
+          }
+
+          if (!webhook.startsWith("https://discord.com/api/webhooks/")) {
+            console.log(`${route.secretName} is malformed; skipping Discord notification.`);
+            process.exit(0);
+          }
+
+          function truncate(value, limit) {
+            const text = String(value || "").replace(/\s+/g, " ").trim();
+            if (!text) return "";
+            return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
+          }
+
+          function fieldValue(value, fallback = "n/a") {
+            return truncate(value, 1000) || fallback;
+          }
+
+          function stripRef(ref) {
+            return String(ref || "")
+              .replace(/^refs\/heads\//, "")
+              .replace(/^refs\/tags\//, "")
+              .replace(/^refs\/pull\//, "pull/");
+          }
+
+          function refLabel() {
+            if (eventName === "pull_request" && payload.pull_request) {
+              const head = payload.pull_request.head?.ref || "unknown";
+              const base = payload.pull_request.base?.ref || "unknown";
+              return `${head} -> ${base}`;
+            }
+            if (eventName === "deployment_status") {
+              return payload.deployment?.ref || stripRef(process.env.GITHUB_REF);
+            }
+            if (eventName === "release" && payload.release?.tag_name) return payload.release.tag_name;
+            if ((eventName === "create" || eventName === "delete") && payload.ref) {
+              return `${payload.ref_type || "ref"} ${payload.ref}`;
+            }
+            return stripRef(payload.ref || process.env.GITHUB_REF);
+          }
+
+          function firstSha() {
+            const candidates = [
+              payload.deployment?.sha,
+              payload.pull_request?.head?.sha,
+              payload.after,
+              process.env.GITHUB_SHA,
+              payload.release?.target_commitish,
+            ];
+
+            for (const candidate of candidates) {
+              const normalized = String(candidate || "");
+              if (!normalized || /^[0]+$/.test(normalized)) continue;
+              if (/^[a-f0-9]{7,40}$/i.test(normalized)) return normalized;
+            }
+
+            return "";
+          }
+
+          function directUrl() {
+            if (eventName === "push") return payload.compare || payload.head_commit?.url || repoUrl;
+            if (eventName === "pull_request") return payload.pull_request?.html_url || repoUrl;
+            if (eventName === "issues") return payload.issue?.html_url || repoUrl;
+            if (eventName === "issue_comment") return payload.comment?.html_url || payload.issue?.html_url || repoUrl;
+            if (eventName === "release") return payload.release?.html_url || repoUrl;
+            if (eventName === "deployment_status") {
+              return (
+                payload.deployment_status?.target_url ||
+                payload.deployment_status?.environment_url ||
+                payload.deployment_status?.log_url ||
+                `${repoUrl}/deployments`
+              );
+            }
+            if (eventName === "discussion") return payload.discussion?.html_url || repoUrl;
+            if (eventName === "discussion_comment") return payload.comment?.html_url || payload.discussion?.html_url || repoUrl;
+            if (eventName === "create" && payload.ref_type === "branch") return `${repoUrl}/tree/${payload.ref}`;
+            if (eventName === "create" && payload.ref_type === "tag") return `${repoUrl}/releases/tag/${payload.ref}`;
+            return repoUrl;
+          }
+
+          function eventTitle() {
+            const readableAction = action ? action.replace(/_/g, " ") : "";
+            if (eventName === "workflow_dispatch") return "Manual Discord notification test";
+            if (eventName === "push") return `Push to ${refLabel() || "repository"}`;
+            if (eventName === "pull_request") return `Pull request #${payload.pull_request?.number || ""} ${readableAction}`.trim();
+            if (eventName === "issues") return `Issue #${payload.issue?.number || ""} ${readableAction}`.trim();
+            if (eventName === "issue_comment") return `Issue comment ${readableAction}`.trim();
+            if (eventName === "create" || eventName === "delete") return `${eventName === "create" ? "Created" : "Deleted"} ${payload.ref_type || "ref"} ${payload.ref || ""}`.trim();
+            if (eventName === "deployment_status") {
+              const state = payload.deployment_status?.state || "updated";
+              const environment = payload.deployment?.environment || payload.deployment_status?.environment || "deployment";
+              return `Deployment ${state} - ${environment}`;
+            }
+            if (eventName === "release") return `Release ${payload.release?.tag_name || payload.release?.name || ""} ${readableAction}`.trim();
+            if (eventName === "discussion") return `Discussion ${readableAction}`.trim();
+            if (eventName === "discussion_comment") return `Discussion comment ${readableAction}`.trim();
+            if (eventName === "fork") return "Repository forked";
+            if (eventName === "watch") return "Repository starred";
+            if (eventName === "public") return "Repository made public";
+            return `${eventName}${readableAction ? ` ${readableAction}` : ""}`;
+          }
+
+          function description() {
+            if (eventName === "workflow_dispatch") return `Manual test event triggered by ${actor}.`;
+            if (eventName === "push") {
+              const count = Array.isArray(payload.commits) ? payload.commits.length : 0;
+              return `${actor} pushed ${count} commit${count === 1 ? "" : "s"} to ${refLabel() || "the repository"}.`;
+            }
+            if (eventName === "pull_request" && payload.pull_request) {
+              return `${actor} ${action || "updated"} pull request #${payload.pull_request.number}.`;
+            }
+            if (eventName === "issues" && payload.issue) return `${actor} ${action || "updated"} issue #${payload.issue.number}.`;
+            if (eventName === "issue_comment" && payload.issue) return `${actor} ${action || "updated"} a comment on issue #${payload.issue.number}.`;
+            if (eventName === "deployment_status") {
+              const state = payload.deployment_status?.state || "updated";
+              const environment = payload.deployment?.environment || payload.deployment_status?.environment || "unknown";
+              return `${actor} reported deployment ${state} for ${environment}.`;
+            }
+            return `${actor} triggered ${eventName}${action ? ` (${action})` : ""}.`;
+          }
+
+          function embedColor() {
+            if (eventName === "deployment_status") {
+              const state = String(payload.deployment_status?.state || "").toLowerCase();
+              if (state === "success") return 0x2ecc71;
+              if (["failure", "error", "inactive"].includes(state)) return 0xe74c3c;
+              if (["pending", "queued", "in_progress"].includes(state)) return 0xf1c40f;
+            }
+            if (eventName === "pull_request" && action === "closed") {
+              return payload.pull_request?.merged ? 0x8e44ad : 0x95a5a6;
+            }
+            if (eventName === "issues" && action === "closed") return 0x95a5a6;
+            if (eventName === "issues" && action === "reopened") return 0x2ecc71;
+            return route.color;
+          }
+
+          const fields = [
+            { name: "Repo", value: fieldValue(repo), inline: true },
+            { name: "Event", value: fieldValue(eventName), inline: true },
+            { name: "Action", value: fieldValue(action), inline: true },
+            { name: "Actor", value: fieldValue(actor), inline: true },
+          ];
+
+          const ref = refLabel();
+          if (ref) fields.push({ name: "Branch / Ref", value: fieldValue(ref), inline: true });
+
+          if (payload.pull_request) {
+            fields.push({
+              name: "Pull Request",
+              value: fieldValue(`#${payload.pull_request.number} ${payload.pull_request.title || ""}`),
+              inline: false,
+            });
+          }
+
+          if (payload.issue) {
+            fields.push({
+              name: "Issue",
+              value: fieldValue(`#${payload.issue.number} ${payload.issue.title || ""}`),
+              inline: false,
+            });
+          }
+
+          if (payload.release) {
+            fields.push({
+              name: "Release",
+              value: fieldValue(`${payload.release.name || "Release"} (${payload.release.tag_name || "no tag"})`),
+              inline: false,
+            });
+          }
+
+          if (payload.deployment || payload.deployment_status) {
+            const environment = payload.deployment?.environment || payload.deployment_status?.environment || "unknown";
+            const state = payload.deployment_status?.state || "unknown";
+            fields.push({ name: "Deployment", value: fieldValue(`${environment} / ${state}`), inline: true });
+          }
+
+          const sha = firstSha();
+          if (sha) {
+            fields.push({
+              name: "Commit",
+              value: `[\`${sha.slice(0, 7)}\`](${repoUrl}/commit/${sha})`,
+              inline: true,
+            });
+          }
+
+          const url = directUrl();
+          if (url) fields.push({ name: "GitHub URL", value: `[Open on GitHub](${url})`, inline: true });
+          fields.push({ name: "Workflow Run", value: `[Open run](${runUrl})`, inline: true });
+
+          const timestamp =
+            payload.deployment_status?.created_at ||
+            payload.release?.published_at ||
+            payload.pull_request?.updated_at ||
+            payload.issue?.updated_at ||
+            new Date().toISOString();
+
+          const body = JSON.stringify({
+            allowed_mentions: { parse: [] },
+            embeds: [
+              {
+                title: truncate(eventTitle(), 256),
+                description: truncate(description(), 4000),
+                url,
+                color: embedColor(),
+                fields,
+                timestamp,
+              },
+            ],
+          });
+
+          function postDiscord(targetUrl, jsonBody) {
+            return new Promise((resolve, reject) => {
+              const parsed = new URL(targetUrl);
+              const request = https.request(
+                {
+                  method: "POST",
+                  hostname: parsed.hostname,
+                  path: `${parsed.pathname}${parsed.search}`,
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Content-Length": Buffer.byteLength(jsonBody),
+                    "User-Agent": "github-actions-discord-events",
+                  },
+                },
+                (response) => {
+                  response.resume();
+                  response.on("end", () => {
+                    if (response.statusCode >= 200 && response.statusCode < 300) {
+                      resolve();
+                      return;
+                    }
+                    reject(new Error(`Discord webhook request failed with status ${response.statusCode}.`));
+                  });
+                }
+              );
+
+              request.on("error", (error) => {
+                reject(new Error(`Discord webhook request failed: ${error.message}`));
+              });
+              request.write(jsonBody);
+              request.end();
+            });
+          }
+
+          postDiscord(webhook, body)
+            .then(() => {
+              console.log(`Sent Discord notification with ${route.secretName}.`);
+            })
+            .catch((error) => {
+              console.error(error.message);
+              process.exit(1);
+            });
+          NODE
