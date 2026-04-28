@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   applyDiscoveredProjectDuration,
   createProjectFromFile,
+  createProjectFromRecordedFile,
   recoverPersistedProjects,
   updateProjectTimestamp,
 } from "@/lib/transcribble/projects";
@@ -51,6 +52,20 @@ test("createProjectFromFile defaults title for extensionless name", () => {
   const file = new File(["audio"], ".mp3", { type: "audio/mpeg" });
   const project = createProjectFromFile(file, "wasm");
   assert.equal(project.title, "Untitled Session");
+});
+
+test("createProjectFromRecordedFile stores generated title, duration, and envelope", () => {
+  const file = new File(["audio"], "Recording 2026-04-28T15-01-00.webm", { type: "audio/webm" });
+  const project = createProjectFromRecordedFile(file, "wasm", "browser", {
+    startedAt: new Date("2026-04-28T15:01:00.000Z"),
+    duration: 12.5,
+    envelope: [0.1, 0.8],
+  });
+
+  assert.match(project.title, /^Recording Apr 28, 2026,? /);
+  assert.equal(project.sourceName, "Recording 2026-04-28T15-01-00.webm");
+  assert.equal(project.duration, 12.5);
+  assert.deepEqual(project.envelope, [0.1, 0.8]);
 });
 
 test("recoverPersistedProjects marks in-progress projects as queued", () => {

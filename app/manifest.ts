@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Transcribble",
     short_name: "Transcribble",
-    description: "Voice Memos-style local transcription workspace for imported recordings.",
+    description: "Voice Memos-style local transcription workspace for recorded and imported audio.",
     start_url: "/?source=pwa",
     scope: "/",
     id: "/",

@@ -4,7 +4,19 @@ Transcribble is a local-first voice workspace for turning recordings into search
 
 Current public app: [transcribble-rho.vercel.app](https://transcribble-rho.vercel.app)
 
-The interface is intentionally Voice Memos-like: a quiet recording list, drag-in import for MP3/MP4/M4A/WAV-style files, a focused player and transcript view, and a direct text export path.
+The interface is intentionally Voice Memos-like: microphone recording, a quiet recording list, drag-in import for MP3/MP4/M4A/WAV-style files, a focused player and transcript view, and a direct text export path.
+
+## Microphone Recording
+
+The home workspace includes a real microphone recorder:
+
+- records through `getUserMedia` and `MediaRecorder`
+- renders a live waveform from browser audio amplitude
+- saves the captured audio into the same IndexedDB/OPFS-backed project library as imported files
+- shows browser SpeechRecognition/webkitSpeechRecognition dictation as a provisional live transcript when the browser supports it
+- runs the final saved transcript through the existing browser-local or localhost-helper transcription route after stop
+
+Live dictation is best-effort browser behavior and is not treated as the source of truth. If it is unavailable, the recording still saves and transcribes after stop.
 
 ## Modes
 
@@ -112,7 +124,9 @@ npm run build
 
 - [app/page.tsx](/Users/dylan/Projects/Dev/transcribble/app/page.tsx): app entry
 - [components/transcribble-app.tsx](/Users/dylan/Projects/Dev/transcribble/components/transcribble-app.tsx): main workspace UI
+- [components/workspace/recording-console.tsx](/Users/dylan/Projects/Dev/transcribble/components/workspace/recording-console.tsx): microphone recording console and live transcript surface
 - [hooks/use-transcribble.ts](/Users/dylan/Projects/Dev/transcribble/hooks/use-transcribble.ts): workspace controller and backend routing integration
+- [lib/transcribble/recording.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/recording.ts): recording MIME, file naming, timer, envelope, and live transcript helpers
 - [lib/transcribble/transcription-backends.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/transcription-backends.ts): browser vs local-helper routing
 - [lib/transcribble/local-helper-client.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/local-helper-client.ts): localhost helper client
 - [lib/transcribble/local-helper-state.ts](/Users/dylan/Projects/Dev/transcribble/lib/transcribble/local-helper-state.ts): helper job to project-state mapping

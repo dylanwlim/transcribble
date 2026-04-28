@@ -17,7 +17,7 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Transcribble",
   description:
-    "Voice Memos-style local transcription workspace for dragging in recordings, using a localhost helper for large media, and exporting clean text transcripts.",
+    "Voice Memos-style local transcription workspace for recording or dragging in audio, using a localhost helper for large media, and exporting clean text transcripts.",
   manifest: "/manifest.webmanifest",
   icons: {
     icon: "/icon",

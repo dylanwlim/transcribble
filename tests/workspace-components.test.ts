@@ -11,8 +11,13 @@ import {
   LOCAL_ACCELERATOR_START_COMMAND,
   SETTINGS_MODAL_TITLE,
 } from "@/lib/transcribble/constants";
+import {
+  INITIAL_RECORDING_VIEW_STATE,
+  LIVE_TRANSCRIPT_UNAVAILABLE_NOTICE,
+} from "@/lib/transcribble/recording";
 import { EmptyState } from "@/components/workspace/empty-state";
 import { Inspector } from "@/components/workspace/inspector";
+import { RecordingConsole } from "@/components/workspace/recording-console";
 import { SettingsSheet } from "@/components/workspace/settings-sheet";
 import { Sidebar } from "@/components/workspace/sidebar";
 import { TranscriptPane } from "@/components/workspace/transcript-pane";
@@ -121,6 +126,46 @@ test("empty state copy keeps local-first import guidance", () => {
 
   assert.ok(html.includes(EMPTY_STATE_COPY));
   assert.doesNotMatch(html, /here - searchable/);
+});
+
+test("recording console exposes real microphone and import actions without sample transcript text", () => {
+  const html = renderToStaticMarkup(
+    createElement(RecordingConsole, {
+      recording: INITIAL_RECORDING_VIEW_STATE,
+      onStart: () => undefined,
+      onStop: () => undefined,
+      onSave: () => undefined,
+      onImport: () => undefined,
+      onOpenSettings: () => undefined,
+    }),
+  );
+
+  assert.match(html, /New recording/);
+  assert.match(html, /Start recording/);
+  assert.match(html, /Add recording/);
+  assert.doesNotMatch(html, /Hello, this is a test/i);
+});
+
+test("recording console shows the precise live transcript unsupported note", () => {
+  const html = renderToStaticMarkup(
+    createElement(RecordingConsole, {
+      recording: {
+        ...INITIAL_RECORDING_VIEW_STATE,
+        status: "recording",
+        startedAt: new Date("2026-04-28T15:01:00Z").toISOString(),
+        elapsedMs: 15_000,
+        notice: LIVE_TRANSCRIPT_UNAVAILABLE_NOTICE,
+        liveSpeechRecognitionSupported: false,
+      },
+      onStart: () => undefined,
+      onStop: () => undefined,
+      onSave: () => undefined,
+      onImport: () => undefined,
+      onOpenSettings: () => undefined,
+    }),
+  );
+
+  assert.match(html, new RegExp(LIVE_TRANSCRIPT_UNAVAILABLE_NOTICE));
 });
 
 test("turn headers stay hidden until a speaker label exists", () => {

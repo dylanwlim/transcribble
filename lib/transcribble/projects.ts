@@ -6,8 +6,10 @@ import {
 } from "@/lib/transcribble/constants";
 import { getDefaultProjectStep } from "@/lib/transcribble/status";
 import { getFileExtension } from "@/lib/transcribble/media";
+import { formatRecordingTitle } from "@/lib/transcribble/recording";
 import type {
   MediaKind,
+  TranscriptDocument,
   TranscriptProject,
   TranscriptionBackend,
   TranscriptionRoute,
@@ -72,6 +74,34 @@ export function createProjectFromImportedFile(
     fileStoreKey: id,
     marks: [],
     savedRanges: [],
+  };
+}
+
+export function createProjectFromRecordedFile(
+  file: File,
+  runtime: Runtime,
+  backend: TranscriptionBackend,
+  options: {
+    startedAt: Date;
+    duration?: number;
+    envelope?: number[];
+    transcript?: TranscriptDocument;
+  },
+): TranscriptProject {
+  const project = createProjectFromImportedFile(file, runtime, backend);
+  const startedAt = options.startedAt.toISOString();
+
+  return {
+    ...project,
+    title: formatRecordingTitle(options.startedAt),
+    createdAt: startedAt,
+    updatedAt: new Date().toISOString(),
+    duration: options.duration,
+    envelope: options.envelope,
+    transcript: options.transcript,
+    detail: options.transcript
+      ? "Saved on this device with a provisional live transcript. The final transcript will replace it after local transcription finishes."
+      : project.detail,
   };
 }
 

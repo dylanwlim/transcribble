@@ -5,8 +5,10 @@ import React, { useMemo } from "react";
 
 import { cn } from "@/lib/utils";
 import { ADD_RECORDING_LABEL } from "@/lib/transcribble/constants";
+import type { RecordingViewState } from "@/lib/transcribble/recording";
 import { formatDuration } from "@/lib/transcribble/transcript";
 import type { TranscriptProject } from "@/lib/transcribble/types";
+import { RecordingConsole } from "./recording-console";
 
 interface LibraryOverviewProps {
   projects: TranscriptProject[];
@@ -15,6 +17,11 @@ interface LibraryOverviewProps {
   desktopAppInstalled: boolean;
   desktopInstallAvailable: boolean;
   onOpenDesktopApp: () => void | Promise<void>;
+  recording: RecordingViewState;
+  onStartRecording: () => void;
+  onStopRecording: () => void;
+  onSaveRecording: () => void;
+  onOpenSettings: () => void;
 }
 
 function formatRelative(iso: string) {
@@ -74,6 +81,11 @@ export function LibraryOverview({
   desktopAppInstalled,
   desktopInstallAvailable,
   onOpenDesktopApp,
+  recording,
+  onStartRecording,
+  onStopRecording,
+  onSaveRecording,
+  onOpenSettings,
 }: LibraryOverviewProps) {
   const sorted = useMemo(() => {
     const copy = projects.slice();
@@ -98,8 +110,17 @@ export function LibraryOverview({
 
   return (
     <div className="scroll-y flex h-full min-h-0 w-full flex-col">
-      <div className="mx-auto w-full max-w-[min(1100px,100%)] px-[var(--workspace-mobile-padding)] py-8 lg:px-10 lg:py-10">
-        <header className="flex flex-wrap items-end justify-between gap-4 pb-6">
+      <div className="mx-auto w-full max-w-[min(1180px,100%)] px-[var(--workspace-mobile-padding)] py-8 lg:px-10 lg:py-10">
+        <RecordingConsole
+          recording={recording}
+          onStart={onStartRecording}
+          onStop={onStopRecording}
+          onSave={onSaveRecording}
+          onImport={onImport}
+          onOpenSettings={onOpenSettings}
+        />
+
+        <header className="mt-16 flex flex-wrap items-end justify-between gap-4 pb-6">
           <div className="min-w-0">
             <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-subtle">
               Library

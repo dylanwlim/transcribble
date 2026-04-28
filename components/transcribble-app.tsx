@@ -8,7 +8,6 @@ import { useTranscribble } from "@/hooks/use-transcribble";
 import {
   ADD_RECORDING_LABEL,
   SETTINGS_OPEN_LABEL,
-  SUPPORTED_FORMAT_LABELS,
 } from "@/lib/transcribble/constants";
 import { formatShortcutTitle } from "@/lib/transcribble/shortcuts";
 import { getProjectViewState } from "@/lib/transcribble/status";
@@ -17,7 +16,7 @@ import type { HighlightColor } from "@/lib/transcribble/types";
 
 import { BrandMark } from "@/components/workspace/brand-mark";
 import { CommandPalette } from "@/components/workspace/command-palette";
-import { DropOverlay, EmptyState } from "@/components/workspace/empty-state";
+import { DropOverlay } from "@/components/workspace/empty-state";
 import { ExportSheet } from "@/components/workspace/export-sheet";
 import { Inspector } from "@/components/workspace/inspector";
 import {
@@ -109,6 +108,10 @@ export function TranscribbleApp() {
     setTranscriptQuery,
     setNotice,
     mediaHandlers,
+    recordingState,
+    startRecording,
+    stopRecording,
+    savePendingRecording,
   } = t;
 
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -168,6 +171,22 @@ export function TranscribbleApp() {
     setExportOpen(false);
     setMobileSidebarOpen(false);
   }, [clearProjectSelection]);
+
+  const startMicrophoneRecording = useCallback(() => {
+    clearProjectSelection();
+    setInspectorOpen(false);
+    setExportOpen(false);
+    setMobileSidebarOpen(false);
+    void startRecording();
+  }, [clearProjectSelection, startRecording]);
+
+  const stopMicrophoneRecording = useCallback(() => {
+    void stopRecording();
+  }, [stopRecording]);
+
+  const saveMicrophoneRecording = useCallback(() => {
+    void savePendingRecording();
+  }, [savePendingRecording]);
 
   const openDesktopApp = useCallback(async () => {
     if (typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches) {
@@ -269,10 +288,7 @@ export function TranscribbleApp() {
     transcriptQuery,
   ]);
 
-  const emptyState = !selectedProject && projects.length === 0;
   const effectiveNotice = notice ?? (capabilityIssue ? { tone: "error" as const, message: capabilityIssue } : null);
-  const supportedFormats = SUPPORTED_FORMAT_LABELS;
-
   const renderSidebar = ({
     closeOnAction = false,
     className,
@@ -320,7 +336,11 @@ export function TranscribbleApp() {
         }}
         onReorder={reorderProjects}
         onToggleRecording={() => {
-          void toggleRecording();
+          if (isRecording) {
+            void toggleRecording();
+          } else {
+            startMicrophoneRecording();
+          }
           finishAction();
         }}
         onOpenSettings={() => {
@@ -376,15 +396,7 @@ export function TranscribbleApp() {
         />
 
         <main className="relative flex min-h-0 min-w-0 flex-1">
-          {emptyState ? (
-            <EmptyState
-              onImport={openFilePicker}
-              desktopAppInstalled={installState.installed}
-              desktopInstallAvailable={installState.installPromptAvailable}
-              onOpenDesktopApp={openDesktopApp}
-              supportedFormats={supportedFormats}
-            />
-          ) : selectedProject ? (
+          {selectedProject ? (
             <>
               <Stage
                 project={selectedProject}
@@ -451,6 +463,11 @@ export function TranscribbleApp() {
               desktopAppInstalled={installState.installed}
               desktopInstallAvailable={installState.installPromptAvailable}
               onOpenDesktopApp={openDesktopApp}
+              recording={recordingState}
+              onStartRecording={startMicrophoneRecording}
+              onStopRecording={stopMicrophoneRecording}
+              onSaveRecording={saveMicrophoneRecording}
+              onOpenSettings={openSettings}
             />
           )}
 

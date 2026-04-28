@@ -12,6 +12,7 @@ Repo truth:
 - Single-route Next.js 15 App Router app. `app/page.tsx` mounts `components/transcribble-app.tsx`.
 - Main controller: `hooks/use-transcribble.ts`.
 - Main workspace shell: `components/workspace/sidebar.tsx`, `stage.tsx`, `transcript-pane.tsx`, `inspector.tsx`, `export-sheet.tsx`, `settings-sheet.tsx`, `library-overview.tsx`, `brand-mark.tsx`.
+- Microphone recording surface: `components/workspace/recording-console.tsx`, driven by the recording state in `hooks/use-transcribble.ts` and helper utilities in `lib/transcribble/recording.ts`.
 - The sidebar/mobile brand header (logo + "Transcribble") clears the selected project and renders `library-overview.tsx`, the aggregated All Recordings grid. The favicon and apple-touch icon are rendered from `app/icon.tsx` and `app/apple-icon.tsx` using the same mark as `BrandMark`.
 - Transcript playback highlight is driven by an rAF loop in `hooks/use-transcribble.ts` while the media is playing, so the `playbackSegmentId` tracks `media.currentTime` in real time instead of the ~4Hz `timeupdate` event.
 - Browser-local processing boundary: `workers/transcriber.worker.ts` plus `lib/transcribble/media.ts`.
@@ -28,6 +29,9 @@ Do not assume:
 - `npm run helper:check` is the diagnostic entrypoint. It should report whether `ffmpeg`, `ffprobe`, the helper venv/backend, or the running localhost service is missing.
 - Helper connectivity from the public HTTPS app must stay friendly: the helper should answer secure-browser localhost preflights/permission checks cleanly, and UI copy must not leak raw fetch strings like `Failed to fetch`.
 - Import validation is quota-aware. Do not reintroduce a fixed file-size cap or “upload” language for local recording imports.
+- Microphone recording is a real local media capture flow using `getUserMedia` + `MediaRecorder`; do not replace it with a fake UI or a parallel persistence system.
+- Live transcript while recording is browser SpeechRecognition/webkitSpeechRecognition only where available. Treat it as provisional browser dictation, not the final local transcript and not a fully local layer.
+- Saved microphone recordings must enter the existing IndexedDB/OPFS project pipeline and the existing browser/helper transcription route after stop.
 - Speaker turns are currently pause-derived. `speakerLabel`, `manual`, and `diarized` are future seams, not a finished speaker workflow.
 - Export is transcript-focused (`txt`, `md`, `srt`, `vtt`). Whole-workspace backup/import is still missing.
 - `lib/transcribble/enrichment.ts` is optional and feature-flagged. Core flows should not depend on hosted enrichments.

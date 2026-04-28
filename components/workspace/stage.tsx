@@ -427,7 +427,7 @@ export function Stage(props: StageProps) {
           segments={segments}
           marks={marks}
           ranges={ranges}
-          envelope={project.transcript?.envelope}
+          envelope={project.transcript?.envelope ?? project.envelope}
           onSeek={(time) => {
             const media = mediaRef.current;
             if (media) {

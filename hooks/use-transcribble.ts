@@ -39,6 +39,7 @@ import {
 import {
   applyDiscoveredProjectDuration,
   createProjectFromImportedFile,
+  createProjectFromRecordedFile,
   recoverPersistedProjects,
   updateProjectTimestamp,
 } from "@/lib/transcribble/projects";
@@ -48,6 +49,17 @@ import {
   normalizeRangeBounds,
 } from "@/lib/transcribble/ranges";
 import { searchProjectEntries, searchProjectLibrary } from "@/lib/transcribble/search";
+import {
+  buildLiveTranscriptText,
+  buildRecordingFileName,
+  chooseRecordingMimeType,
+  INITIAL_RECORDING_VIEW_STATE,
+  LIVE_TRANSCRIPT_UNAVAILABLE_NOTICE,
+  mergeLiveTranscriptParts,
+  resampleRecordingEnvelope,
+  type LiveTranscriptPart,
+  type RecordingViewState,
+} from "@/lib/transcribble/recording";
 import {
   buildLocalHelperRequiredDetail,
   projectNeedsHelperReconnect,
@@ -180,6 +192,90 @@ interface HelperPreferences {
   enableDiarization: boolean;
 }
 
+interface SpeechRecognitionAlternativeLike {
+  transcript: string;
+}
+
+interface SpeechRecognitionResultLike {
+  readonly isFinal: boolean;
+  readonly length: number;
+  item(index: number): SpeechRecognitionAlternativeLike;
+  [index: number]: SpeechRecognitionAlternativeLike;
+}
+
+interface SpeechRecognitionResultListLike {
+  readonly length: number;
+  item(index: number): SpeechRecognitionResultLike;
+  [index: number]: SpeechRecognitionResultLike;
+}
+
+interface SpeechRecognitionEventLike extends Event {
+  readonly resultIndex: number;
+  readonly results: SpeechRecognitionResultListLike;
+}
+
+interface SpeechRecognitionErrorEventLike extends Event {
+  readonly error?: string;
+  readonly message?: string;
+}
+
+interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+type WindowWithSpeechRecognition = Window &
+  typeof globalThis & {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  };
+
+type AudioContextConstructor = typeof AudioContext;
+type WindowWithAudioContext = Window &
+  typeof globalThis & {
+    webkitAudioContext?: AudioContextConstructor;
+  };
+
+interface RecordingController {
+  recorder: MediaRecorder;
+  stream: MediaStream;
+  chunks: Blob[];
+  startedAt: number;
+  mimeType: string;
+  audioContext?: AudioContext;
+  analyser?: AnalyserNode;
+  analyserData?: Uint8Array<ArrayBuffer>;
+  waveformFrameId?: number;
+  lastWaveformSampleAt: number;
+  lastWaveformStateAt: number;
+  envelopeSamples: number[];
+  usingWaveformFallback: boolean;
+  recognition?: SpeechRecognitionLike;
+  recognitionStopExpected: boolean;
+  recognitionRestartTimerId?: number;
+  recognitionRestartCount: number;
+  pendingSave?: PendingRecordedFile;
+}
+
+interface PendingRecordedFile {
+  file: File;
+  startedAt: number;
+  stoppedAt: number;
+  durationSeconds: number;
+  envelope: number[];
+  liveTranscriptText: string;
+}
+
 const UI_STATE_KEY = "transcribble-ui-state-v2";
 const ASSET_STATE_KEY = "transcribble-asset-state-v1";
 const HELPER_PREFERENCES_KEY = "transcribble-helper-preferences-v1";
@@ -283,6 +379,92 @@ function isLocalHelperConnectionFailure(message: string) {
   );
 }
 
+function getSpeechRecognitionConstructor() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const speechWindow = window as WindowWithSpeechRecognition;
+  return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition ?? null;
+}
+
+function getAudioContextConstructor() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const audioWindow = window as WindowWithAudioContext;
+  return audioWindow.AudioContext ?? audioWindow.webkitAudioContext ?? null;
+}
+
+function isPermissionDeniedError(error: unknown) {
+  return (
+    error instanceof DOMException &&
+    (error.name === "NotAllowedError" || error.name === "SecurityError" || error.name === "PermissionDeniedError")
+  );
+}
+
+function getRecordingStartErrorMessage(error: unknown) {
+  if (error instanceof DOMException) {
+    if (error.name === "NotAllowedError" || error.name === "SecurityError" || error.name === "PermissionDeniedError") {
+      return "Microphone access was blocked. Enable it in the browser settings and try again.";
+    }
+
+    if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+      return "No microphone was found. Connect a microphone and try again.";
+    }
+
+    if (error.name === "NotReadableError" || error.name === "TrackStartError") {
+      return "The microphone is already in use or could not be read by this browser.";
+    }
+  }
+
+  return "Could not start recording. Check microphone access and try again.";
+}
+
+async function requestMicrophoneStream() {
+  const mediaDevices = navigator.mediaDevices;
+  const preferredConstraints: MediaStreamConstraints = {
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+  };
+
+  try {
+    return await mediaDevices.getUserMedia(preferredConstraints);
+  } catch (error) {
+    if (isPermissionDeniedError(error)) {
+      throw error;
+    }
+
+    return mediaDevices.getUserMedia({ audio: true });
+  }
+}
+
+function createProvisionalTranscript(
+  projectId: string,
+  liveTranscriptText: string,
+  durationSeconds: number,
+  envelope: number[],
+) {
+  const text = liveTranscriptText.trim();
+  if (!text) {
+    return undefined;
+  }
+
+  const document = buildTranscriptDocument(
+    projectId,
+    {
+      text,
+    },
+    durationSeconds,
+  );
+
+  return envelope.length > 0 ? { ...document, envelope } : document;
+}
+
 export function useTranscribble() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const mediaRef = useRef<HTMLAudioElement | HTMLVideoElement | null>(null);
@@ -301,6 +483,10 @@ export function useTranscribble() {
   const selectedProjectIdRef = useRef<string | null>(null);
   const helperInFlightRef = useRef<Set<string>>(new Set());
   const helperUrlRef = useRef<string | null>(null);
+  const recordingControllerRef = useRef<RecordingController | null>(null);
+  const recordingStateRef = useRef<RecordingViewState>(INITIAL_RECORDING_VIEW_STATE);
+  const pendingRecordedFileRef = useRef<PendingRecordedFile | null>(null);
+  const liveTranscriptRef = useRef({ finalText: "", interimText: "" });
 
   const [projects, setProjects] = useState<TranscriptProject[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -330,6 +516,11 @@ export function useTranscribble() {
   const [helperPreferences, setHelperPreferences] = useState<HelperPreferences>(
     () => readStoredJson<HelperPreferences>(HELPER_PREFERENCES_KEY) ?? DEFAULT_HELPER_PREFERENCES,
   );
+  const [recordingState, setRecordingState] = useState<RecordingViewState>(() => ({
+    ...INITIAL_RECORDING_VIEW_STATE,
+    liveSpeechRecognitionSupported: Boolean(getSpeechRecognitionConstructor()),
+    notice: getSpeechRecognitionConstructor() ? null : LIVE_TRANSCRIPT_UNAVAILABLE_NOTICE,
+  }));
   const [installState, setInstallState] = useState<InstallState>({
     shellReady: false,
     installPromptAvailable: false,
@@ -339,6 +530,7 @@ export function useTranscribble() {
 
   projectsRef.current = projects;
   selectedProjectIdRef.current = selectedProjectId;
+  recordingStateRef.current = recordingState;
   const deferredLibraryQuery = useDeferredValue(libraryQuery);
   const deferredTranscriptQuery = useDeferredValue(transcriptQuery);
 
@@ -368,27 +560,31 @@ export function useTranscribble() {
         select?: boolean;
       } = {},
     ) => {
+      const currentProjects = projectsRef.current;
       let nextProject: TranscriptProject | null = null;
+      const nextProjects = currentProjects.map((project) => {
+        if (project.id !== projectId) {
+          return project;
+        }
 
-      setProjects((previous) => {
-        const nextProjects = previous.map((project) => {
-          if (project.id !== projectId) {
-            return project;
-          }
-
-          nextProject = updateProjectTimestamp(updater(project));
-          return nextProject;
-        });
-
-        return sortProjects(nextProjects);
+        nextProject = updateProjectTimestamp(updater(project));
+        return nextProject;
       });
+
+      if (!nextProject) {
+        return;
+      }
+
+      const sortedProjects = sortProjects(nextProjects);
+      projectsRef.current = sortedProjects;
+      setProjects(sortedProjects);
 
       if (options.select) {
         setSelectedProjectId(projectId);
         persistProjectSelection(projectId);
       }
 
-      if (options.persist && nextProject) {
+      if (options.persist) {
         void putProject(nextProject);
       }
     },
@@ -1711,84 +1907,665 @@ export function useTranscribble() {
     [enqueueFiles],
   );
 
-  const recordingStateRef = useRef<{
-    recorder: MediaRecorder;
-    stream: MediaStream;
-    chunks: Blob[];
-    startedAt: number;
-  } | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
-
-  const stopRecording = useCallback(async () => {
-    const state = recordingStateRef.current;
-    if (!state) return;
-    recordingStateRef.current = null;
-    const { recorder, stream, chunks, startedAt } = state;
-    await new Promise<void>((resolve) => {
-      if (recorder.state === "inactive") {
-        resolve();
-        return;
-      }
-      recorder.addEventListener("stop", () => resolve(), { once: true });
-      recorder.stop();
-    });
-    stream.getTracks().forEach((track) => track.stop());
-    setIsRecording(false);
-    if (chunks.length === 0) return;
-    const mimeType = recorder.mimeType || "audio/webm";
-    const extension = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
-    const stamp = new Date(startedAt).toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    const file = new File(chunks, `Recording ${stamp}.${extension}`, { type: mimeType });
-    await enqueueFiles([file]);
-  }, [enqueueFiles]);
-
-  const startRecording = useCallback(async () => {
-    if (recordingStateRef.current) return;
-    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-      setNotice({ tone: "error", message: "This browser does not expose a microphone API." });
-      return;
+  const stopRecordingResources = useCallback((controller: RecordingController) => {
+    if (controller.waveformFrameId !== undefined) {
+      window.cancelAnimationFrame(controller.waveformFrameId);
+      controller.waveformFrameId = undefined;
     }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const preferredTypes = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"];
-      const supportedType = preferredTypes.find((type) =>
-        typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(type),
-      );
-      const recorder = supportedType
-        ? new MediaRecorder(stream, { mimeType: supportedType })
-        : new MediaRecorder(stream);
-      const chunks: Blob[] = [];
-      recorder.addEventListener("dataavailable", (event) => {
-        if (event.data && event.data.size > 0) {
-          chunks.push(event.data);
+
+    if (controller.recognitionRestartTimerId !== undefined) {
+      window.clearTimeout(controller.recognitionRestartTimerId);
+      controller.recognitionRestartTimerId = undefined;
+    }
+
+    controller.recognitionStopExpected = true;
+    if (controller.recognition) {
+      controller.recognition.onresult = null;
+      controller.recognition.onerror = null;
+      controller.recognition.onend = null;
+      try {
+        controller.recognition.stop();
+      } catch {
+        try {
+          controller.recognition.abort();
+        } catch {
+          // Recognition can throw if it has already ended.
         }
-      });
-      recorder.start(1000);
-      recordingStateRef.current = {
-        recorder,
-        stream,
-        chunks,
-        startedAt: Date.now(),
-      };
-      setIsRecording(true);
-    } catch (error) {
-      setNotice({
-        tone: "error",
-        message:
-          error instanceof Error && error.name === "NotAllowedError"
-            ? "Microphone access was blocked. Enable it in the browser settings and try again."
-            : "Could not start recording. Check microphone access and try again.",
-      });
+      }
+      controller.recognition = undefined;
     }
+
+    controller.stream.getTracks().forEach((track) => track.stop());
+    void controller.audioContext?.close().catch(() => undefined);
   }, []);
 
+  const pushRecordingEnvelopeState = useCallback((controller: RecordingController, elapsedMs: number) => {
+    setRecordingState((previous) => ({
+      ...previous,
+      elapsedMs,
+      liveEnvelope: resampleRecordingEnvelope(controller.envelopeSamples, 900),
+    }));
+  }, []);
+
+  const startWaveformLoop = useCallback(
+    (controller: RecordingController) => {
+      const tick = (timestamp: number) => {
+        if (recordingControllerRef.current !== controller || controller.recorder.state === "inactive") {
+          return;
+        }
+
+        const shouldSample = timestamp - controller.lastWaveformSampleAt >= 45;
+        if (shouldSample) {
+          let amplitude = 0;
+          if (controller.analyser && controller.analyserData) {
+            controller.analyser.getByteTimeDomainData(controller.analyserData);
+            let sumSquares = 0;
+            for (let index = 0; index < controller.analyserData.length; index += 1) {
+              const centered = (controller.analyserData[index] - 128) / 128;
+              sumSquares += centered * centered;
+            }
+            amplitude = Math.min(1, Math.sqrt(sumSquares / controller.analyserData.length) * 4.8);
+          } else if (controller.usingWaveformFallback) {
+            amplitude = 0.08 + Math.abs(Math.sin(timestamp / 180)) * 0.22;
+          }
+
+          controller.envelopeSamples.push(amplitude);
+          controller.lastWaveformSampleAt = timestamp;
+        }
+
+        if (timestamp - controller.lastWaveformStateAt >= 80) {
+          controller.lastWaveformStateAt = timestamp;
+          pushRecordingEnvelopeState(controller, Date.now() - controller.startedAt);
+        }
+
+        controller.waveformFrameId = window.requestAnimationFrame(tick);
+      };
+
+      controller.waveformFrameId = window.requestAnimationFrame(tick);
+    },
+    [pushRecordingEnvelopeState],
+  );
+
+  const setupRecordingAnalyser = useCallback(
+    async (controller: RecordingController) => {
+      try {
+        const AudioContextClass = getAudioContextConstructor();
+        if (!AudioContextClass) {
+          controller.usingWaveformFallback = true;
+          startWaveformLoop(controller);
+          return;
+        }
+
+        const audioContext = new AudioContextClass();
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 2048;
+        analyser.smoothingTimeConstant = 0.8;
+        const source = audioContext.createMediaStreamSource(controller.stream);
+        source.connect(analyser);
+
+        controller.audioContext = audioContext;
+        controller.analyser = analyser;
+        controller.analyserData = new Uint8Array(analyser.fftSize);
+
+        if (audioContext.state === "suspended") {
+          await audioContext.resume().catch(() => undefined);
+        }
+
+        startWaveformLoop(controller);
+      } catch {
+        controller.usingWaveformFallback = true;
+        startWaveformLoop(controller);
+      }
+    },
+    [startWaveformLoop],
+  );
+
+  const startLiveSpeechRecognition = useCallback((controller: RecordingController) => {
+    const Recognition = getSpeechRecognitionConstructor();
+    if (!Recognition) {
+      setRecordingState((previous) => ({
+        ...previous,
+        liveSpeechRecognitionSupported: false,
+        liveSpeechRecognitionActive: false,
+        notice: LIVE_TRANSCRIPT_UNAVAILABLE_NOTICE,
+      }));
+      return;
+    }
+
+    const startRecognition = () => {
+      if (recordingControllerRef.current !== controller || controller.recognitionStopExpected) {
+        return;
+      }
+
+      const recognition = new Recognition();
+      recognition.lang = "en-US";
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+
+      recognition.onresult = (event) => {
+        const parts: LiveTranscriptPart[] = [];
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+          const result = event.results[index] ?? event.results.item(index);
+          const alternative = result[0] ?? result.item(0);
+          parts.push({
+            transcript: alternative?.transcript ?? "",
+            isFinal: result.isFinal,
+          });
+        }
+
+        if (parts.length === 0) {
+          return;
+        }
+
+        setRecordingState((previous) => {
+          const merged = mergeLiveTranscriptParts(previous.liveFinalTranscript, parts);
+          liveTranscriptRef.current = {
+            finalText: merged.finalText,
+            interimText: merged.interimText,
+          };
+          return {
+            ...previous,
+            liveFinalTranscript: merged.finalText,
+            liveInterimTranscript: merged.interimText,
+            liveSpeechRecognitionSupported: true,
+            liveSpeechRecognitionActive: true,
+            notice:
+              previous.notice === LIVE_TRANSCRIPT_UNAVAILABLE_NOTICE
+                ? null
+                : previous.notice,
+          };
+        });
+        controller.recognitionRestartCount = 0;
+      };
+
+      recognition.onerror = (event) => {
+        setRecordingState((previous) => ({
+          ...previous,
+          liveSpeechRecognitionActive: false,
+          notice:
+            event.error === "not-allowed"
+              ? "Live transcript permission was blocked. Recording still continues and will transcribe after you stop."
+              : previous.notice,
+        }));
+      };
+
+      recognition.onend = () => {
+        setRecordingState((previous) => ({
+          ...previous,
+          liveSpeechRecognitionActive: false,
+        }));
+
+        if (
+          recordingControllerRef.current !== controller ||
+          controller.recognitionStopExpected ||
+          controller.recorder.state !== "recording"
+        ) {
+          return;
+        }
+
+        if (controller.recognitionRestartCount >= 4) {
+          setRecordingState((previous) => ({
+            ...previous,
+            notice: "Live transcript stopped, but recording continues and will transcribe after you stop.",
+          }));
+          return;
+        }
+
+        controller.recognitionRestartCount += 1;
+        controller.recognitionRestartTimerId = window.setTimeout(startRecognition, 500);
+      };
+
+      controller.recognition = recognition;
+      try {
+        recognition.start();
+        setRecordingState((previous) => ({
+          ...previous,
+          liveSpeechRecognitionSupported: true,
+          liveSpeechRecognitionActive: true,
+        }));
+      } catch {
+        setRecordingState((previous) => ({
+          ...previous,
+          liveSpeechRecognitionSupported: true,
+          liveSpeechRecognitionActive: false,
+          notice: "Live transcript could not start. Recording still continues and will transcribe after you stop.",
+        }));
+      }
+    };
+
+    startRecognition();
+  }, []);
+
+  const savePendingRecording = useCallback(async () => {
+    const pending = pendingRecordedFileRef.current;
+    if (!pending) {
+      return null;
+    }
+
+    setRecordingState((previous) => ({
+      ...previous,
+      status: "saving",
+      error: null,
+      canRetrySave: false,
+      notice: previous.notice,
+    }));
+
+    const validation = await validateMediaImport(pending.file, storageState);
+
+    if (!validation.ok) {
+      throw new Error(validation.error ?? "This recording could not be saved in local storage.");
+    }
+
+    const latestHelperCapabilities =
+      helperCapabilities?.available
+        ? helperCapabilities
+        : await refreshHelperCapabilities().catch(() => helperCapabilities);
+
+    const backendDecision = chooseTranscriptionBackend(pending.file, {
+      browserLocalAvailable: capabilityIssue === null,
+      helperAvailable: Boolean(latestHelperCapabilities?.available),
+      deviceMemoryGb:
+        typeof navigator === "undefined"
+          ? null
+          : (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? null,
+      hardwareConcurrency:
+        typeof navigator === "undefined" ? null : navigator.hardwareConcurrency ?? null,
+    });
+
+    let project = createProjectFromRecordedFile(
+      pending.file,
+      runtime,
+      backendDecision.backend,
+      {
+        startedAt: new Date(pending.startedAt),
+        duration: pending.durationSeconds,
+        envelope: pending.envelope,
+      },
+    );
+
+    const provisionalTranscript = createProvisionalTranscript(
+      project.id,
+      pending.liveTranscriptText,
+      pending.durationSeconds,
+      pending.envelope,
+    );
+
+    if (provisionalTranscript) {
+      project = {
+        ...project,
+        transcript: provisionalTranscript,
+        detail:
+          "Saved on this device with a provisional live transcript. The final transcript will replace it after local transcription finishes.",
+      };
+    }
+
+    if (backendDecision.backend === "local-helper" && backendDecision.requiresHelperInstall) {
+      project = applyProjectStep(
+        {
+          ...project,
+          backend: "local-helper",
+          transcriptionRoute: "local-helper",
+        },
+        {
+          status: "paused",
+          step: "needs-local-helper",
+          progress: 0,
+          detail: backendDecision.reason,
+          error: undefined,
+        },
+      );
+    }
+
+    await putProjectWithFile(project, pending.file);
+    pendingRecordedFileRef.current = null;
+
+    const mergedProjects = sortProjects([project, ...projectsRef.current]);
+    projectsRef.current = mergedProjects;
+    setProjects(mergedProjects);
+    setSelectedProjectId(project.id);
+    persistProjectSelection(project.id);
+    void refreshStorageState();
+
+    if (backendDecision.backend === "local-helper" && !backendDecision.requiresHelperInstall) {
+      void startHelperTranscriptionForProject(project.id, pending.file, {
+        reason: backendDecision.reason,
+      });
+    }
+
+    setRecordingState((previous) => ({
+      ...previous,
+      status:
+        project.status === "ready"
+          ? "saved"
+          : project.status === "error" || project.status === "paused"
+            ? "saved"
+            : "transcribing",
+      savedProjectId: project.id,
+      stoppedAt: new Date(pending.stoppedAt).toISOString(),
+      error: null,
+      canRetrySave: false,
+      notice: previous.notice,
+    }));
+
+    setNotice({
+      tone: "info",
+      message: `"${project.title}" was saved on this device.`,
+    });
+
+    return project;
+  }, [
+    capabilityIssue,
+    helperCapabilities,
+    persistProjectSelection,
+    refreshHelperCapabilities,
+    refreshStorageState,
+    runtime,
+    startHelperTranscriptionForProject,
+    storageState,
+  ]);
+
+  const stopRecording = useCallback(async () => {
+    const controller = recordingControllerRef.current;
+    if (!controller) {
+      if (pendingRecordedFileRef.current) {
+        try {
+          await savePendingRecording();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "This recording could not be saved.";
+          setRecordingState((previous) => ({
+            ...previous,
+            status: "error",
+            error: message,
+            canRetrySave: true,
+          }));
+          setNotice({ tone: "error", message });
+        }
+      }
+      return;
+    }
+
+    if (recordingStateRef.current.status === "stopping" || recordingStateRef.current.status === "saving") {
+      return;
+    }
+
+    recordingControllerRef.current = null;
+    setRecordingState((previous) => ({
+      ...previous,
+      status: "stopping",
+      liveSpeechRecognitionActive: false,
+      error: null,
+    }));
+
+    const stoppedAt = Date.now();
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
+          controller.recorder.removeEventListener("stop", onStop);
+          controller.recorder.removeEventListener("error", onError);
+        };
+        const onStop = () => {
+          cleanup();
+          resolve();
+        };
+        const onError = (event: Event) => {
+          cleanup();
+          const error = event instanceof ErrorEvent ? event.error : undefined;
+          reject(error instanceof Error ? error : new Error("The recorder stopped with an error."));
+        };
+
+        if (controller.recorder.state === "inactive") {
+          resolve();
+          return;
+        }
+
+        controller.recorder.addEventListener("stop", onStop, { once: true });
+        controller.recorder.addEventListener("error", onError, { once: true });
+
+        try {
+          controller.recorder.requestData();
+        } catch {
+          // Some browsers throw if data is already being finalized.
+        }
+        controller.recorder.stop();
+      });
+
+      stopRecordingResources(controller);
+      pushRecordingEnvelopeState(controller, stoppedAt - controller.startedAt);
+
+      const chunks = controller.chunks.filter((chunk) => chunk.size > 0);
+      if (chunks.length === 0) {
+        throw new Error("The microphone did not produce any audio data.");
+      }
+
+      const mimeType = controller.recorder.mimeType || controller.mimeType || chunks.find((chunk) => chunk.type)?.type || "audio/webm";
+      const file = new File(chunks, buildRecordingFileName(new Date(controller.startedAt), mimeType), {
+        type: mimeType,
+        lastModified: stoppedAt,
+      });
+      const liveTranscriptText = buildLiveTranscriptText(
+        liveTranscriptRef.current.finalText,
+        liveTranscriptRef.current.interimText,
+      );
+      const pending: PendingRecordedFile = {
+        file,
+        startedAt: controller.startedAt,
+        stoppedAt,
+        durationSeconds: Math.max(0.1, (stoppedAt - controller.startedAt) / 1000),
+        envelope: resampleRecordingEnvelope(controller.envelopeSamples, 1024),
+        liveTranscriptText,
+      };
+
+      pendingRecordedFileRef.current = pending;
+      controller.pendingSave = pending;
+      setRecordingState((previous) => ({
+        ...previous,
+        status: "saving",
+        stoppedAt: new Date(stoppedAt).toISOString(),
+        elapsedMs: stoppedAt - controller.startedAt,
+        mimeType,
+        chunkCount: chunks.length,
+        liveEnvelope: pending.envelope,
+        liveFinalTranscript: liveTranscriptRef.current.finalText,
+        liveInterimTranscript: liveTranscriptRef.current.interimText,
+      }));
+
+      await savePendingRecording();
+    } catch (error) {
+      stopRecordingResources(controller);
+      const message = error instanceof Error ? error.message : "This recording could not be saved.";
+      setRecordingState((previous) => ({
+        ...previous,
+        status: "error",
+        error: message,
+        canRetrySave: Boolean(pendingRecordedFileRef.current),
+        liveSpeechRecognitionActive: false,
+      }));
+      setNotice({ tone: "error", message });
+    }
+  }, [pushRecordingEnvelopeState, savePendingRecording, stopRecordingResources]);
+
+  const startRecording = useCallback(async () => {
+    if (recordingControllerRef.current) {
+      return;
+    }
+
+    if (typeof window === "undefined" || typeof navigator === "undefined") {
+      return;
+    }
+
+    if (!window.isSecureContext && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+      const message = "Microphone recording needs HTTPS or localhost.";
+      setRecordingState((previous) => ({
+        ...previous,
+        status: "error",
+        error: message,
+      }));
+      setNotice({ tone: "error", message });
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      const message = "This browser does not expose a microphone API.";
+      setRecordingState((previous) => ({
+        ...previous,
+        status: "error",
+        error: message,
+      }));
+      setNotice({ tone: "error", message });
+      return;
+    }
+
+    if (typeof MediaRecorder === "undefined") {
+      const message = "This browser cannot save microphone recordings because MediaRecorder is unavailable.";
+      setRecordingState((previous) => ({
+        ...previous,
+        status: "error",
+        error: message,
+      }));
+      setNotice({ tone: "error", message });
+      return;
+    }
+
+    const speechSupported = Boolean(getSpeechRecognitionConstructor());
+    pendingRecordedFileRef.current = null;
+    liveTranscriptRef.current = { finalText: "", interimText: "" };
+    setRecordingState({
+      ...INITIAL_RECORDING_VIEW_STATE,
+      status: "requesting-permission",
+      liveSpeechRecognitionSupported: speechSupported,
+      notice: speechSupported ? null : LIVE_TRANSCRIPT_UNAVAILABLE_NOTICE,
+    });
+
+    let stream: MediaStream | null = null;
+
+    try {
+      stream = await requestMicrophoneStream();
+      const preferredMimeType = chooseRecordingMimeType(MediaRecorder);
+      const recorder = preferredMimeType
+        ? new MediaRecorder(stream, { mimeType: preferredMimeType })
+        : new MediaRecorder(stream);
+      const startedAt = Date.now();
+      const mimeType = recorder.mimeType || preferredMimeType || "audio/webm";
+      const controller: RecordingController = {
+        recorder,
+        stream,
+        chunks: [],
+        startedAt,
+        mimeType,
+        lastWaveformSampleAt: 0,
+        lastWaveformStateAt: 0,
+        envelopeSamples: [],
+        usingWaveformFallback: false,
+        recognitionStopExpected: false,
+        recognitionRestartCount: 0,
+      };
+
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data && event.data.size > 0) {
+          controller.chunks.push(event.data);
+          setRecordingState((previous) => ({
+            ...previous,
+            chunkCount: controller.chunks.length,
+            mimeType: event.data.type || previous.mimeType,
+          }));
+        }
+      });
+
+      recorder.addEventListener("error", () => {
+        setRecordingState((previous) => ({
+          ...previous,
+          status: "error",
+          error: "The recorder hit an error. The microphone has been stopped.",
+          liveSpeechRecognitionActive: false,
+        }));
+        void stopRecording();
+      });
+
+      recorder.start(1000);
+      recordingControllerRef.current = controller;
+      setRecordingState((previous) => ({
+        ...previous,
+        status: "recording",
+        startedAt: new Date(startedAt).toISOString(),
+        stoppedAt: null,
+        elapsedMs: 0,
+        mimeType,
+        error: null,
+        savedProjectId: null,
+        canRetrySave: false,
+      }));
+      void setupRecordingAnalyser(controller);
+      startLiveSpeechRecognition(controller);
+    } catch (error) {
+      stream?.getTracks().forEach((track) => track.stop());
+      const message = getRecordingStartErrorMessage(error);
+      setRecordingState((previous) => ({
+        ...previous,
+        status: "error",
+        error: message,
+        liveSpeechRecognitionActive: false,
+      }));
+      setNotice({ tone: "error", message });
+    }
+  }, [setupRecordingAnalyser, startLiveSpeechRecognition, stopRecording]);
+
   const toggleRecording = useCallback(async () => {
-    if (recordingStateRef.current) {
+    if (recordingControllerRef.current || recordingStateRef.current.status === "recording") {
       await stopRecording();
     } else {
       await startRecording();
     }
   }, [startRecording, stopRecording]);
+
+  const isRecording =
+    recordingState.status === "requesting-permission" ||
+    recordingState.status === "recording" ||
+    recordingState.status === "stopping";
+
+  useEffect(() => {
+    setRecordingState((previous) => {
+      const supported = Boolean(getSpeechRecognitionConstructor());
+      if (previous.liveSpeechRecognitionSupported === supported) {
+        return previous;
+      }
+      return {
+        ...previous,
+        liveSpeechRecognitionSupported: supported,
+        notice:
+          supported || previous.status === "idle"
+            ? previous.notice
+            : LIVE_TRANSCRIPT_UNAVAILABLE_NOTICE,
+      };
+    });
+  }, []);
+
+  useEffect(() => {
+    const savedProjectId = recordingState.savedProjectId;
+    if (!savedProjectId || recordingState.status === "saved") {
+      return;
+    }
+
+    const savedProject = projects.find((project) => project.id === savedProjectId);
+    if (savedProject?.status === "ready") {
+      setRecordingState((previous) => ({
+        ...previous,
+        status: "saved",
+      }));
+    }
+  }, [projects, recordingState.savedProjectId, recordingState.status]);
+
+  useEffect(() => {
+    return () => {
+      const controller = recordingControllerRef.current;
+      if (!controller) {
+        return;
+      }
+      recordingControllerRef.current = null;
+      stopRecordingResources(controller);
+    };
+  }, [stopRecordingResources]);
 
   const onCopyTranscript = useCallback(async () => {
     if (!selectedProject?.transcript?.plainText) {
@@ -2716,6 +3493,7 @@ export function useTranscribble() {
     dragActive,
     copied,
     notice,
+    recordingState,
     assetProgressItems,
     queuedProjects,
     isBusy,
@@ -2747,6 +3525,9 @@ export function useTranscribble() {
     reorderProjects,
     revertSegmentText,
     toggleRecording,
+    startRecording,
+    stopRecording,
+    savePendingRecording,
     isRecording,
     updateSelectedSegmentText,
     toggleBookmark: () => upsertMark("bookmark"),

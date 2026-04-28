@@ -362,6 +362,7 @@ export interface TranscriptProject {
   resumeState?: LocalHelperResumeState;
   transcriptionRoute?: TranscriptionRoute;
   duration?: number;
+  envelope?: number[];
   fileStoreKey: string;
   transcript?: TranscriptDocument;
   marks: TranscriptMark[];
