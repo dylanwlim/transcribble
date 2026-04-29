@@ -114,6 +114,19 @@ test("getProjectViewState enables transcript controls only when the transcript i
   assert.equal(view.transcriptBadgeLabel, "Transcript ready");
 });
 
+test("getProjectViewState does not allow saved ranges for provisional transcripts", () => {
+  const view = getProjectViewState({
+    ...buildReadyProject(),
+    status: "transcribing",
+    step: "transcribing",
+    detail: "Saved with a provisional live transcript while final transcription continues.",
+  });
+
+  assert.equal(view.canUseTranscript, true);
+  assert.equal(view.canExport, true);
+  assert.equal(view.canSaveRanges, false);
+});
+
 test("getProjectViewState keeps failed sessions calm and non-optimistic", () => {
   const view = getProjectViewState({
     ...buildProject(),

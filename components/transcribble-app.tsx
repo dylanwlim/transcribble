@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Menu, Upload, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -12,6 +12,7 @@ import {
 import { formatShortcutTitle } from "@/lib/transcribble/shortcuts";
 import { getProjectViewState } from "@/lib/transcribble/status";
 import { formatBytes } from "@/lib/transcribble/transcript";
+import { getLaunchAction, removeLaunchActionFromUrl } from "@/lib/transcribble/launch-actions";
 import type { HighlightColor } from "@/lib/transcribble/types";
 
 import { BrandMark } from "@/components/workspace/brand-mark";
@@ -34,6 +35,7 @@ export function TranscribbleApp() {
 
   const {
     inputRef,
+    backupImportRef,
     mediaRef,
     transcriptSearchRef,
     librarySearchRef,
@@ -66,6 +68,7 @@ export function TranscribbleApp() {
     accept,
     openFilePicker,
     onFileInputChange,
+    onWorkspaceBackupInputChange,
     onDrop,
     onDragOver,
     onDragLeave,
@@ -96,6 +99,8 @@ export function TranscribbleApp() {
     askForPersistentStorage,
     resetSetupState,
     promptInstall,
+    exportWorkspaceBackup,
+    openWorkspaceBackupImport,
     refreshHelperCapabilities,
     updateHelperAlignment,
     updateHelperDiarization,
@@ -121,12 +126,39 @@ export function TranscribbleApp() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [installSheetOpen, setInstallSheetOpen] = useState(false);
   const [installPlatform, setInstallPlatform] = useState<InstallPlatform>("generic");
+  const launchActionHandledRef = useRef(false);
 
   useEffect(() => {
     const handler = () => setPaletteOpen(true);
     window.addEventListener("transcribble:command-palette", handler);
     return () => window.removeEventListener("transcribble:command-palette", handler);
   }, []);
+
+  useEffect(() => {
+    if (!workspaceReady || launchActionHandledRef.current || typeof window === "undefined") {
+      return;
+    }
+
+    if (getLaunchAction(window.location.search) !== "add") {
+      return;
+    }
+
+    launchActionHandledRef.current = true;
+    clearProjectSelection();
+    setInspectorOpen(false);
+    setExportOpen(false);
+    setSettingsOpen(false);
+    setMobileSidebarOpen(false);
+
+    const nextUrl = removeLaunchActionFromUrl(window.location.href);
+    window.history.replaceState(window.history.state, "", nextUrl);
+
+    window.requestAnimationFrame(() => {
+      if (recordingState.status === "idle") {
+        inputRef.current?.click();
+      }
+    });
+  }, [clearProjectSelection, inputRef, recordingState.status, workspaceReady]);
 
   const matchedSegmentIds = useMemo(
     () =>
@@ -184,8 +216,8 @@ export function TranscribbleApp() {
     void stopRecording();
   }, [stopRecording]);
 
-  const saveMicrophoneRecording = useCallback(() => {
-    void savePendingRecording();
+  const saveMicrophoneRecording = useCallback(async () => {
+    await savePendingRecording();
   }, [savePendingRecording]);
 
   const openDesktopApp = useCallback(async () => {
@@ -383,6 +415,14 @@ export function TranscribbleApp() {
         className="hidden"
         aria-hidden
       />
+      <input
+        ref={backupImportRef}
+        type="file"
+        accept="application/json,.json"
+        onChange={onWorkspaceBackupInputChange}
+        className="hidden"
+        aria-hidden
+      />
 
       <div className="hidden min-h-0 lg:block">
         {renderSidebar({ className: "h-full", showSearchShortcut: true })}
@@ -436,6 +476,7 @@ export function TranscribbleApp() {
                 canSearch={selectedProjectView?.canSearchTranscript ?? false}
                 canEdit={selectedProject.status === "ready"}
                 canExport={selectedProjectView?.canExport ?? false}
+                canSaveRanges={selectedProjectView?.canSaveRanges ?? false}
                 onBookmarkSegment={bookmarkSegment}
                 onSaveRange={saveRange}
                 onRevertSegment={revertSegmentText}
@@ -567,6 +608,7 @@ export function TranscribbleApp() {
         helperModels={helperCapabilities?.models ?? []}
         helperModelProfile={helperPreferences.modelProfile}
         helperPhraseHints={helperPreferences.phraseHints}
+        helperSupportsPhraseHints={helperCapabilities?.supportsPhraseHints ?? false}
         helperSupportsAlignment={helperCapabilities?.supportsAlignment ?? false}
         helperSupportsDiarization={helperCapabilities?.supportsDiarization ?? false}
         helperAlignmentEnabled={helperPreferences.enableAlignment}
@@ -576,6 +618,8 @@ export function TranscribbleApp() {
         onHelperAlignmentChange={updateHelperAlignment}
         onHelperDiarizationChange={updateHelperDiarization}
         onRefreshHelper={() => void refreshHelperCapabilities()}
+        onExportWorkspaceBackup={() => void exportWorkspaceBackup()}
+        onImportWorkspaceBackup={openWorkspaceBackupImport}
       />
 
       <CommandPalette

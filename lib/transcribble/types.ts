@@ -74,6 +74,7 @@ export interface LocalHelperCapabilities {
   ffmpegReady?: boolean;
   ffprobeReady?: boolean;
   supportsWordTimestamps?: boolean;
+  supportsPhraseHints?: boolean;
   supportsAlignment?: boolean;
   supportsDiarization?: boolean;
   maxParallelChunks?: number;

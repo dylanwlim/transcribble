@@ -266,6 +266,7 @@ def capabilities_payload() -> dict[str, Any]:
         "ffmpegReady": bool(ffmpeg_path()),
         "ffprobeReady": bool(ffprobe_path()),
         "supportsWordTimestamps": backend in {"mlx-whisper", "faster-whisper", "stub"},
+        "supportsPhraseHints": backend in {"mlx-whisper", "faster-whisper"},
         "supportsAlignment": False,
         "supportsDiarization": False,
         "maxParallelChunks": max_parallel_chunks(backend),
@@ -1076,7 +1077,7 @@ def transcribe_chunk(
                 job_id,
                 profile,
                 "mlx-whisper",
-                lambda: (transcribe_with_mlx(chunk_path, profile), "mlx-whisper", mlx_model_name(profile)),
+                lambda: (transcribe_with_mlx(chunk_path, profile, phrase_hints), "mlx-whisper", mlx_model_name(profile)),
             )
         except Exception:
             if "faster-whisper" in available_backends():
@@ -1155,13 +1156,15 @@ def transcribe_with_faster_whisper(chunk_path: Path, profile: str, phrase_hints:
     }
 
 
-def transcribe_with_mlx(chunk_path: Path, profile: str) -> dict[str, Any]:
+def transcribe_with_mlx(chunk_path: Path, profile: str, phrase_hints: list[str]) -> dict[str, Any]:
     import mlx_whisper
 
     result = mlx_whisper.transcribe(
         str(chunk_path),
         path_or_hf_repo=mlx_model_name(profile),
         word_timestamps=True,
+        initial_prompt=", ".join(phrase_hints) if phrase_hints else None,
+        condition_on_previous_text=False,
     )
     segments = result.get("segments", [])
     return {

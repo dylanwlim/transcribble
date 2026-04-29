@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import http from "node:http";
 import test, { afterEach } from "node:test";
 
@@ -225,6 +226,7 @@ test("fetchLocalHelperCapabilities detects a reachable helper and helper job syn
   };
 
   let job = { ...baseJob };
+  let createdPayload: unknown = null;
   const server = http.createServer(async (request, response) => {
     const url = request.url ?? "/";
     response.setHeader("content-type", "application/json");
@@ -254,6 +256,7 @@ test("fetchLocalHelperCapabilities detects a reachable helper and helper job syn
           ffmpegReady: true,
           ffprobeReady: true,
           supportsWordTimestamps: true,
+          supportsPhraseHints: true,
           supportsAlignment: false,
           supportsDiarization: false,
           cacheBytes: 0,
@@ -265,6 +268,11 @@ test("fetchLocalHelperCapabilities detects a reachable helper and helper job syn
     }
 
     if (request.method === "POST" && url === "/jobs") {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      createdPayload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
       response.end(JSON.stringify({ job }));
       return;
     }
@@ -352,8 +360,10 @@ test("fetchLocalHelperCapabilities detects a reachable helper and helper job syn
     sourceSize: 1.1 * 1024 * 1024 * 1024,
     mediaKind: "video",
     modelProfile: "fast",
+    phraseHints: ["Maya Patel", "RFP"],
   });
   assert.equal(created.job.id, "job-1");
+  assert.deepEqual((createdPayload as { phraseHints?: string[] }).phraseHints, ["Maya Patel", "RFP"]);
 
   const uploaded = await uploadLocalHelperSourceFile(
     helperBaseUrl,
@@ -386,6 +396,14 @@ test("fetchLocalHelperCapabilities normalizes raw browser fetch failures into lo
   assert.doesNotMatch(capabilities.reason ?? "", /^Failed to fetch$/i);
   assert.match(capabilities.reason ?? "", /localhost/i);
   assert.match(capabilities.nextAction ?? "", /helper:check/i);
+});
+
+test("MLX helper path passes phrase hints as an initial prompt when supported", async () => {
+  const source = await readFile(new URL("../helper/transcribble_helper.py", import.meta.url), "utf8");
+
+  assert.match(source, /"supportsPhraseHints": backend in \{"mlx-whisper", "faster-whisper"\}/);
+  assert.match(source, /def transcribe_with_mlx\(chunk_path: Path, profile: str, phrase_hints: list\[str\]\)/);
+  assert.match(source, /initial_prompt=", "\.join\(phrase_hints\) if phrase_hints else None/);
 });
 
 test("readLocalHelperJob retries a transient helper 500 before failing", async (t) => {

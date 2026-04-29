@@ -19,7 +19,7 @@ const STAGE_COPY: Record<ProjectStep, StageCopy> = {
   uploading: {
     badgeLabel: "Sending",
     headline: "Sending recording",
-    summary: "Sending this recording to the local accelerator.",
+    summary: "Sending this local recording to the accelerator on this machine.",
     tone: "working",
   },
   queued: {
@@ -32,7 +32,7 @@ const STAGE_COPY: Record<ProjectStep, StageCopy> = {
     badgeLabel: "Local helper",
     headline: "Local accelerator required",
     summary:
-      "This recording is saved on this device, but it needs the Transcribble Helper running on this machine before transcription can continue.",
+      "This recording is saved on this device, but it needs the Transcribble Helper running on this machine before transcription can continue. Run npm run helper:start, or run npm run helper:check to diagnose setup.",
     tone: "warning",
   },
   "getting-local-model": {
@@ -267,9 +267,9 @@ export function getProjectViewState(
       canSearchTranscript: false,
       canExport: false,
       canSaveRanges: false,
-      transcriptBadgeLabel: status.step === "uploading" ? "Uploading recording" : "Waiting to upload",
+      transcriptBadgeLabel: status.step === "uploading" ? "Sending recording" : "Waiting to send",
       transcriptSearchPlaceholder: "Search unlocks after the transcript is ready",
-      transcriptEmptyTitle: status.step === "uploading" ? "Uploading recording" : "Waiting to upload",
+      transcriptEmptyTitle: status.step === "uploading" ? "Sending recording" : "Waiting to send",
       transcriptEmptyBody: status.summary,
     };
   }

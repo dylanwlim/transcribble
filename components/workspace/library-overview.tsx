@@ -6,6 +6,7 @@ import React, { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { ADD_RECORDING_LABEL } from "@/lib/transcribble/constants";
 import type { RecordingViewState } from "@/lib/transcribble/recording";
+import { sortProjects } from "@/lib/transcribble/project-order";
 import { formatDuration } from "@/lib/transcribble/transcript";
 import type { TranscriptProject } from "@/lib/transcribble/types";
 import { RecordingConsole } from "./recording-console";
@@ -20,7 +21,7 @@ interface LibraryOverviewProps {
   recording: RecordingViewState;
   onStartRecording: () => void;
   onStopRecording: () => void;
-  onSaveRecording: () => void;
+  onSaveRecording: () => void | Promise<void>;
   onOpenSettings: () => void;
 }
 
@@ -88,12 +89,7 @@ export function LibraryOverview({
   onOpenSettings,
 }: LibraryOverviewProps) {
   const sorted = useMemo(() => {
-    const copy = projects.slice();
-    copy.sort((a, b) => {
-      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-    });
-    return copy;
+    return sortProjects(projects);
   }, [projects]);
 
   const readyCount = projects.filter((p) => p.status === "ready").length;

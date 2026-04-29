@@ -68,6 +68,7 @@ interface StageProps {
   canSearch: boolean;
   canEdit: boolean;
   canExport: boolean;
+  canSaveRanges: boolean;
   onBookmarkSegment?: (segmentId: string) => void;
   onSaveRange?: (args: { start: number; end: number; label?: string }) => void;
   onRevertSegment?: (segmentId: string) => void;
@@ -112,6 +113,7 @@ export function Stage(props: StageProps) {
     canSearch,
     canEdit,
     canExport,
+    canSaveRanges,
     onBookmarkSegment,
     onSaveRange,
     onRevertSegment,
@@ -384,6 +386,7 @@ export function Stage(props: StageProps) {
           partialTranscript={partialTranscript}
           canSearch={canSearch}
           canEdit={canEdit}
+          canSaveRanges={canSaveRanges}
           onBookmarkSegment={onBookmarkSegment}
           onSaveRange={onSaveRange}
           onRevertSegment={onRevertSegment}

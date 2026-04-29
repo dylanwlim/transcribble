@@ -24,6 +24,7 @@ export interface RecordingViewState {
   liveSpeechRecognitionActive: boolean;
   savedProjectId: string | null;
   canRetrySave: boolean;
+  previewUrl: string | null;
 }
 
 export interface LiveTranscriptPart {
@@ -62,7 +63,51 @@ export const INITIAL_RECORDING_VIEW_STATE: RecordingViewState = {
   liveSpeechRecognitionActive: false,
   savedProjectId: null,
   canRetrySave: false,
+  previewUrl: null,
 };
+
+export function getRecordingSaveErrorMessage(error: unknown) {
+  if (error instanceof DOMException) {
+    if (error.name === "QuotaExceededError") {
+      return "Not enough local browser storage was available to save this recording. Free space and try saving again.";
+    }
+
+    if (error.name === "AbortError") {
+      return "Saving was canceled before this recording was written. Try saving again when you're ready.";
+    }
+  }
+
+  const rawMessage = error instanceof Error ? error.message.trim() : "";
+  const lower = rawMessage.toLowerCase();
+
+  if (
+    lower === "failed to fetch" ||
+    lower.includes("networkerror") ||
+    lower.includes("network request failed")
+  ) {
+    return "The local accelerator was not reachable on localhost. The recording is still here; run npm run helper:start or npm run helper:check, then try again.";
+  }
+
+  if (lower.includes("quota") || lower.includes("storage")) {
+    return rawMessage || "Local browser storage could not save this recording. Free space and try again.";
+  }
+
+  return rawMessage || "This recording could not be saved. Try again when you're ready.";
+}
+
+export function buildRecordingSaveFailureState(
+  previous: RecordingViewState,
+  error: unknown,
+  canRetrySave: boolean,
+): RecordingViewState {
+  return {
+    ...previous,
+    status: "error",
+    error: getRecordingSaveErrorMessage(error),
+    canRetrySave,
+    liveSpeechRecognitionActive: false,
+  };
+}
 
 export function chooseRecordingMimeType(support?: RecordingMimeTypeSupport | null) {
   if (!support || typeof support.isTypeSupported !== "function") {

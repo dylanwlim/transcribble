@@ -30,7 +30,7 @@ export const LOCAL_PROCESSING_NOTE =
 export const LOCAL_ACCELERATOR_NOTE =
   "Saved on this device. Longer or larger recordings should use the local accelerator running on this machine.";
 export const LOCAL_ACCELERATOR_REQUIRED_NOTE =
-  "Large or memory-heavy recordings need the Transcribble Helper running on this machine. Open Settings for the install and start steps, then retry.";
+  "Large or memory-heavy recordings need the Transcribble Helper running on this machine. Run npm run helper:start, or run npm run helper:check to diagnose setup, then retry.";
 export const LOCAL_ACCELERATOR_ENDPOINT = "http://127.0.0.1:7771";
 export const LOCAL_ACCELERATOR_FALLBACK_ENDPOINT = "http://localhost:7771";
 export const LOCAL_ACCELERATOR_INSTALL_COMMAND = "npm run helper:install";

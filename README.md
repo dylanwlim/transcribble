@@ -69,6 +69,7 @@ It:
 - shows explicit helper-side model download progress while the first local model is being prepared
 - persists job state locally so refreshes and helper restarts can resume
 - prefers MLX Whisper on Apple Silicon when available, otherwise uses `faster-whisper`
+- applies the phrase dictionary through the local helper when the active backend supports prompts; MLX Whisper and `faster-whisper` both receive the hints
 
 ### Install The Helper
 
@@ -101,6 +102,18 @@ The app also surfaces:
 - whether persistent local storage was granted
 - local storage usage and available space when the browser exposes it
 - quota-aware import checks instead of a fixed file-size cap
+
+## Workspace Backup
+
+Settings includes a local JSON workspace backup/import path.
+
+The backup includes project metadata, transcripts, saved ranges, analysis/search metadata, and media files that the browser can still read from IndexedDB/OPFS. Import is additive by default: it validates the schema first, keeps the current library, remaps conflicting IDs, and reports how many projects and media files were restored. If a media file cannot be exported or restored, the project comes back as transcript metadata only and says that the original media is missing.
+
+## PWA And Offline Shell
+
+The PWA manifest includes an Add Recording shortcut at `/?action=add`; the single-route app handles that launch action by returning to All Recordings and opening the add-recording path when the browser allows it.
+
+The service worker is intentionally narrow: navigations are network-first with a cached shell only as an offline fallback, static app assets use a versioned cache, and helper/API/localhost-style responses are not cached.
 
 ## Development
 
@@ -139,5 +152,5 @@ npm run build
 - Browser mode is intentionally conservative and should not be treated as “supports any FFmpeg-decodable media.”
 - The helper requires local Python plus native `ffmpeg` / `ffprobe`.
 - Speaker turns in the app stay pause-derived unless a future local diarization pass is enabled.
-- Optional alignment and diarization controls are exposed as helper settings, but the default helper build does not bundle those heavier local dependencies yet.
-- Whole-workspace backup and re-import are still not implemented.
+- Optional alignment and diarization controls stay unavailable unless a future helper build reports support; the current helper build does not bundle those heavier local dependencies.
+- Workspace backup/import is local JSON. It restores media only when the browser can read the saved media into the backup; otherwise it restores metadata and transcripts without playback media.

@@ -58,6 +58,7 @@ function getUnavailableCapabilities(reason: string): LocalHelperCapabilities {
     available: false,
     url: LOCAL_ACCELERATOR_ENDPOINT,
     models: [],
+    supportsPhraseHints: false,
     reason,
     nextAction:
       `Run ${LOCAL_ACCELERATOR_CHECK_COMMAND} in this repo to diagnose whether ffmpeg, ffprobe, the helper virtualenv, or the localhost service is missing. ` +
@@ -196,7 +197,7 @@ export async function uploadLocalHelperSourceFile(
 
     if (!response.ok) {
       const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(body?.error ?? "Could not upload the recording to the local helper.");
+      throw new Error(body?.error ?? "Could not send the recording to the local helper.");
     }
 
     return (await response.json()) as { job: LocalHelperJob };
@@ -217,15 +218,15 @@ export async function uploadLocalHelperSourceFile(
       onProgress(Math.round((event.loaded / event.total) * 100));
     };
 
-    request.onerror = () => reject(new Error("Could not upload the recording to the local helper."));
-    request.onabort = () => reject(new Error("Local helper upload was canceled."));
+    request.onerror = () => reject(new Error("Could not send the recording to the local helper."));
+    request.onabort = () => reject(new Error("Sending to the local helper was canceled."));
     request.onload = () => {
       if (request.status < 200 || request.status >= 300) {
         const body =
           typeof request.response === "object" && request.response
             ? (request.response as { error?: string })
             : null;
-        reject(new Error(body?.error ?? "Could not upload the recording to the local helper."));
+        reject(new Error(body?.error ?? "Could not send the recording to the local helper."));
         return;
       }
 

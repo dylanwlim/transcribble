@@ -50,6 +50,7 @@ interface TranscriptPaneProps {
   partialTranscript?: string;
   canSearch: boolean;
   canEdit: boolean;
+  canSaveRanges: boolean;
   onBookmarkSegment?: (segmentId: string) => void;
   onSaveRange?: (args: { start: number; end: number; label?: string }) => void;
 }
@@ -82,6 +83,13 @@ function highlightText(text: string, query: string) {
 
 export function shouldRenderTurnHeader(turn: Pick<TranscriptTurn, "speakerLabel">) {
   return Boolean(turn.speakerLabel?.trim());
+}
+
+export function shouldExposeSaveRangeAction(
+  canSaveRanges: boolean,
+  onSaveRange?: (args: { start: number; end: number; label?: string }) => void,
+) {
+  return canSaveRanges && Boolean(onSaveRange);
 }
 
 function TurnHeader({ turn }: { turn: TranscriptTurn }) {
@@ -291,6 +299,7 @@ export function TranscriptPane({
   partialTranscript,
   canSearch,
   canEdit,
+  canSaveRanges,
   onBookmarkSegment,
   onSaveRange,
 }: TranscriptPaneProps) {
@@ -417,6 +426,7 @@ export function TranscriptPane({
 
   const hasSegments = segments.length > 0;
   const partial = partialTranscript?.trim();
+  const saveRangeEnabled = shouldExposeSaveRangeAction(canSaveRanges, onSaveRange);
 
   const matchTotal = matchedSegmentIds.size;
   const matchIndex = transcriptQuery && focusedSegmentId && matchedSegmentIds.has(focusedSegmentId)
@@ -516,7 +526,7 @@ export function TranscriptPane({
               : undefined
           }
           onSaveRange={
-            onSaveRange
+            saveRangeEnabled && onSaveRange
               ? () => {
                   onSaveRange({
                     start: selectionActions.start,

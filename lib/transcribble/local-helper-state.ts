@@ -2,6 +2,7 @@ import { buildTranscriptDocument } from "@/lib/transcribble/analysis";
 import { LOCAL_ACCELERATOR_REQUIRED_NOTE } from "@/lib/transcribble/constants";
 import { applyProjectStep } from "@/lib/transcribble/status";
 import type {
+  LocalHelperCapabilities,
   LocalHelperJob,
   TranscriptProject,
 } from "@/lib/transcribble/types";
@@ -17,7 +18,26 @@ export function projectNeedsHelperReconnect(project: TranscriptProject) {
 }
 
 export function buildLocalHelperRequiredDetail(reason?: string) {
+  if (reason?.includes(LOCAL_ACCELERATOR_REQUIRED_NOTE) || reason?.includes("npm run helper:check")) {
+    return reason;
+  }
   return reason ? `${reason} ${LOCAL_ACCELERATOR_REQUIRED_NOTE}` : LOCAL_ACCELERATOR_REQUIRED_NOTE;
+}
+
+export function resolveLocalHelperStart(
+  capabilities: LocalHelperCapabilities | null | undefined,
+) {
+  if (capabilities?.available && capabilities.url) {
+    return {
+      available: true as const,
+      url: capabilities.url,
+    };
+  }
+
+  return {
+    available: false as const,
+    reason: capabilities?.reason ?? "Transcribble Helper was not reachable on localhost.",
+  };
 }
 
 export function syncLocalHelperJobIntoProject(project: TranscriptProject, job: LocalHelperJob) {

@@ -3,6 +3,7 @@
 import {
   Copy,
   Loader2,
+  Pause,
   Play,
   RotateCcw,
   RotateCw,
@@ -27,7 +28,7 @@ interface RecordingConsoleProps {
   recording: RecordingViewState;
   onStart: () => void;
   onStop: () => void;
-  onSave: () => void;
+  onSave: () => void | Promise<void>;
   onImport: () => void;
   onOpenSettings: () => void;
 }
@@ -61,6 +62,15 @@ export function RecordingConsole({
     Boolean(recording.liveInterimTranscript.trim());
   const startedAt = recording.startedAt ? new Date(recording.startedAt) : null;
   const title = startedAt ? formatRecordingTitle(startedAt) : "New recording";
+  const previewRef = useRef<HTMLAudioElement | null>(null);
+  const [previewPlaying, setPreviewPlaying] = useState(false);
+  const [previewTime, setPreviewTime] = useState(0);
+  const canPreview = Boolean(recording.previewUrl) && !active;
+
+  useEffect(() => {
+    setPreviewPlaying(false);
+    setPreviewTime(0);
+  }, [recording.previewUrl]);
 
   const handlePrimary = () => {
     if (active) {
@@ -69,11 +79,30 @@ export function RecordingConsole({
     }
 
     if (canRetrySave) {
-      onSave();
+      void onSave();
       return;
     }
 
     onStart();
+  };
+
+  const togglePreview = () => {
+    const media = previewRef.current;
+    if (!media) return;
+
+    if (media.paused) {
+      void media.play();
+    } else {
+      media.pause();
+    }
+  };
+
+  const seekPreviewBy = (deltaSeconds: number) => {
+    const media = previewRef.current;
+    if (!media) return;
+    const duration = Number.isFinite(media.duration) ? media.duration : recording.elapsedMs / 1000;
+    media.currentTime = Math.max(0, Math.min(duration, media.currentTime + deltaSeconds));
+    setPreviewTime(media.currentTime);
   };
 
   const primaryLabel = active
@@ -148,6 +177,18 @@ export function RecordingConsole({
       </div>
 
       <div className="mt-6 rounded-[22px] border border-border bg-surface/90 px-5 pb-5 pt-6 shadow-[0_1px_2px_rgba(16,20,28,0.03)] sm:px-7 sm:pb-6 sm:pt-7">
+        {recording.previewUrl ? (
+          <audio
+            ref={previewRef}
+            src={recording.previewUrl}
+            preload="metadata"
+            onPlay={() => setPreviewPlaying(true)}
+            onPause={() => setPreviewPlaying(false)}
+            onEnded={() => setPreviewPlaying(false)}
+            onTimeUpdate={(event) => setPreviewTime(event.currentTarget.currentTime)}
+            className="hidden"
+          />
+        ) : null}
         <RecordingWaveform
           samples={recording.liveEnvelope}
           elapsedMs={recording.elapsedMs}
@@ -156,7 +197,9 @@ export function RecordingConsole({
         />
 
         <div className="mt-5 text-center text-[34px] font-semibold leading-none tracking-normal text-foreground tabular sm:text-[40px]">
-          {formatRecordingTimer(recording.elapsedMs)}
+          {canPreview && previewTime > 0
+            ? formatRecordingTimer(previewTime * 1000)
+            : formatRecordingTimer(recording.elapsedMs)}
         </div>
 
         <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
@@ -175,22 +218,33 @@ export function RecordingConsole({
             </button>
           </div>
 
-          <div className="inline-flex items-center gap-1 rounded-full border border-border bg-surface/80 px-2 py-1">
-            <ConsoleButton label="Back 15 seconds" disabled>
-              <SkipGlyph direction="back" />
-            </ConsoleButton>
-            <ConsoleButton label="Play recording preview" disabled>
-              <Play className="ml-0.5 h-4 w-4 fill-current" />
-            </ConsoleButton>
-            <ConsoleButton label="Forward 15 seconds" disabled>
-              <SkipGlyph direction="forward" />
-            </ConsoleButton>
-          </div>
+          {canPreview ? (
+            <div className="inline-flex items-center gap-1 rounded-full border border-border bg-surface/80 px-2 py-1">
+              <ConsoleButton label="Back 15 seconds" onClick={() => seekPreviewBy(-15)}>
+                <SkipGlyph direction="back" />
+              </ConsoleButton>
+              <ConsoleButton
+                label={previewPlaying ? "Pause recording preview" : "Play recording preview"}
+                onClick={togglePreview}
+              >
+                {previewPlaying ? (
+                  <Pause className="h-4 w-4 fill-current" />
+                ) : (
+                  <Play className="ml-0.5 h-4 w-4 fill-current" />
+                )}
+              </ConsoleButton>
+              <ConsoleButton label="Forward 15 seconds" onClick={() => seekPreviewBy(15)}>
+                <SkipGlyph direction="forward" />
+              </ConsoleButton>
+            </div>
+          ) : (
+            <div aria-hidden className="h-11" />
+          )}
 
           <div className="flex justify-end">
             <button
               type="button"
-              onClick={canRetrySave ? onSave : undefined}
+              onClick={canRetrySave ? () => void onSave() : undefined}
               disabled={!canRetrySave}
               aria-label={canRetrySave ? "Save recording" : saveLabel}
               className={cn(
@@ -467,18 +521,18 @@ function LiveTranscriptSection({
 function ConsoleButton({
   children,
   label,
-  disabled,
+  onClick,
 }: {
   children: React.ReactNode;
   label: string;
-  disabled?: boolean;
+  onClick: () => void;
 }) {
   return (
     <button
       type="button"
-      disabled={disabled}
       aria-label={label}
-      className="inline-flex h-9 w-9 items-center justify-center rounded-full text-subtle ring-focus disabled:cursor-default disabled:opacity-60"
+      onClick={onClick}
+      className="inline-flex h-9 w-9 items-center justify-center rounded-full text-subtle ring-focus hover:bg-muted hover:text-foreground"
     >
       {children}
     </button>

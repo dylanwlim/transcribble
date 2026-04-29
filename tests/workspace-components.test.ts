@@ -21,7 +21,7 @@ import { RecordingConsole } from "@/components/workspace/recording-console";
 import { SettingsSheet } from "@/components/workspace/settings-sheet";
 import { Sidebar } from "@/components/workspace/sidebar";
 import { TranscriptPane } from "@/components/workspace/transcript-pane";
-import { shouldRenderTurnHeader } from "@/components/workspace/transcript-pane";
+import { shouldExposeSaveRangeAction, shouldRenderTurnHeader } from "@/components/workspace/transcript-pane";
 
 test("sidebar exposes the desktop app affordance and a calm status footer", () => {
   const html = renderToStaticMarkup(
@@ -93,6 +93,7 @@ test("settings sheet renders the local workspace dialog heading", () => {
       helperModels: [],
       helperModelProfile: "fast",
       helperPhraseHints: "",
+      helperSupportsPhraseHints: false,
       helperSupportsAlignment: false,
       helperSupportsDiarization: false,
       helperAlignmentEnabled: false,
@@ -102,6 +103,8 @@ test("settings sheet renders the local workspace dialog heading", () => {
       onHelperAlignmentChange: () => undefined,
       onHelperDiarizationChange: () => undefined,
       onRefreshHelper: () => undefined,
+      onExportWorkspaceBackup: () => undefined,
+      onImportWorkspaceBackup: () => undefined,
     }),
   );
 
@@ -111,6 +114,9 @@ test("settings sheet renders the local workspace dialog heading", () => {
   assert.match(html, new RegExp(LOCAL_ACCELERATOR_INSTALL_COMMAND));
   assert.match(html, new RegExp(LOCAL_ACCELERATOR_START_COMMAND));
   assert.match(html, new RegExp(LOCAL_ACCELERATOR_CHECK_COMMAND));
+  assert.match(html, /Workspace backup/);
+  assert.match(html, /Export workspace/);
+  assert.match(html, /Current speaker turns remain pause-derived, not diarized/);
 });
 
 test("empty state copy keeps local-first import guidance", () => {
@@ -144,6 +150,30 @@ test("recording console exposes real microphone and import actions without sampl
   assert.match(html, /Start recording/);
   assert.match(html, /Add recording/);
   assert.doesNotMatch(html, /Hello, this is a test/i);
+  assert.doesNotMatch(html, /Play recording preview/);
+});
+
+test("recording console shows preview transport only when a stopped recording has media", () => {
+  const html = renderToStaticMarkup(
+    createElement(RecordingConsole, {
+      recording: {
+        ...INITIAL_RECORDING_VIEW_STATE,
+        status: "error",
+        elapsedMs: 12_000,
+        canRetrySave: true,
+        previewUrl: "blob:recording-preview",
+      },
+      onStart: () => undefined,
+      onStop: () => undefined,
+      onSave: () => undefined,
+      onImport: () => undefined,
+      onOpenSettings: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Play recording preview/);
+  assert.match(html, /Back 15 seconds/);
+  assert.match(html, /Forward 15 seconds/);
 });
 
 test("recording console shows the precise live transcript unsupported note", () => {
@@ -184,6 +214,12 @@ test("turn headers stay hidden until a speaker label exists", () => {
   );
 });
 
+test("save range action is only exposed for final ready transcripts", () => {
+  assert.equal(shouldExposeSaveRangeAction(true, () => undefined), true);
+  assert.equal(shouldExposeSaveRangeAction(false, () => undefined), false);
+  assert.equal(shouldExposeSaveRangeAction(true, undefined), false);
+});
+
 test("transcript pane surfaces local-accelerator-required guidance instead of a generic empty state", () => {
   const html = renderToStaticMarkup(
     createElement(TranscriptPane, {
@@ -201,7 +237,7 @@ test("transcript pane surfaces local-accelerator-required guidance instead of a 
         progress: 0,
         stageLabel: "Local accelerator required",
         detail:
-          "Large or memory-heavy recordings need the Transcribble Helper running on this machine. Open Settings for the install and start steps, then retry.",
+          "Large or memory-heavy recordings need the Transcribble Helper running on this machine. Run npm run helper:start, or run npm run helper:check to diagnose setup, then retry.",
         runtime: "wasm",
         backend: "local-helper",
         fileStoreKey: "helper-project",
@@ -224,6 +260,7 @@ test("transcript pane surfaces local-accelerator-required guidance instead of a 
       partialTranscript: "",
       canSearch: false,
       canEdit: false,
+      canSaveRanges: false,
     }),
   );
 

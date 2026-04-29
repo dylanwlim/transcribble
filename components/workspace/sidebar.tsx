@@ -195,12 +195,14 @@ function ProjectRow({
       aria-selected={selected}
       draggable={!isActive && !renaming}
       onDragStart={(event) => {
+        event.stopPropagation();
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData("text/plain", project.id);
         onDragStartRow(project.id);
       }}
       onDragOver={(event) => {
         event.preventDefault();
+        event.stopPropagation();
         event.dataTransfer.dropEffect = "move";
         const rect = event.currentTarget.getBoundingClientRect();
         const position = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
@@ -209,6 +211,7 @@ function ProjectRow({
       onDragLeave={() => setDropHint(null)}
       onDrop={(event) => {
         event.preventDefault();
+        event.stopPropagation();
         const position = dropHint ?? "after";
         setDropHint(null);
         onDropOnRow(project.id, position);

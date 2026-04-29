@@ -51,8 +51,10 @@ import {
 import { searchProjectEntries, searchProjectLibrary } from "@/lib/transcribble/search";
 import {
   buildLiveTranscriptText,
+  buildRecordingSaveFailureState,
   buildRecordingFileName,
   chooseRecordingMimeType,
+  getRecordingSaveErrorMessage,
   INITIAL_RECORDING_VIEW_STATE,
   LIVE_TRANSCRIPT_UNAVAILABLE_NOTICE,
   mergeLiveTranscriptParts,
@@ -63,9 +65,12 @@ import {
 import {
   buildLocalHelperRequiredDetail,
   projectNeedsHelperReconnect,
+  resolveLocalHelperStart,
   syncLocalHelperJobIntoProject,
 } from "@/lib/transcribble/local-helper-state";
-import { applyProjectStep } from "@/lib/transcribble/status";
+import { hasExternalFileDrag } from "@/lib/transcribble/drag-and-drop";
+import { sortProjects, reorderProjectsById } from "@/lib/transcribble/project-order";
+import { applyProjectStep, getProjectViewState } from "@/lib/transcribble/status";
 import {
   readBrowserStorageState,
   requestPersistentStorage,
@@ -102,6 +107,16 @@ import {
   putProjectWithFile,
   putProjects,
 } from "@/lib/transcribble/workspace-db";
+import {
+  createWorkspaceBackup,
+  prepareWorkspaceBackupImport,
+  validateWorkspaceBackupPayload,
+} from "@/lib/transcribble/workspace-backup";
+import {
+  createPersistedProjectSelection,
+  resolveInitialProjectSelection,
+  type PersistedUiState,
+} from "@/lib/transcribble/ui-state";
 
 interface WorkerProgressItem {
   file: string;
@@ -144,10 +159,6 @@ interface ActiveJob {
 interface WorkspaceNotice {
   tone: "info" | "error";
   message: string;
-}
-
-interface PersistedUiState {
-  selectedProjectId?: string | null;
 }
 
 interface PersistedAssetState {
@@ -316,21 +327,6 @@ function writeStoredJson(key: string, value: unknown) {
   }
 }
 
-function sortProjects(projects: TranscriptProject[]) {
-  return [...projects].sort((left, right) => {
-    const pinnedDelta = Number(right.pinned ?? false) - Number(left.pinned ?? false);
-    if (pinnedDelta !== 0) return pinnedDelta;
-    const leftOrder = left.sortOrder;
-    const rightOrder = right.sortOrder;
-    if (leftOrder !== undefined && rightOrder !== undefined) {
-      return leftOrder - rightOrder;
-    }
-    if (leftOrder !== undefined) return -1;
-    if (rightOrder !== undefined) return 1;
-    return right.updatedAt.localeCompare(left.updatedAt);
-  });
-}
-
 function isTextEntryTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -375,7 +371,8 @@ function isLocalHelperConnectionFailure(message: string) {
     lower.includes("local helper") ||
     lower.includes("localhost") ||
     lower.includes("connection refused") ||
-    lower.includes("could not upload the recording to the local helper")
+    lower.includes("could not upload the recording to the local helper") ||
+    lower.includes("could not send the recording to the local helper")
   );
 }
 
@@ -467,6 +464,7 @@ function createProvisionalTranscript(
 
 export function useTranscribble() {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const backupImportRef = useRef<HTMLInputElement | null>(null);
   const mediaRef = useRef<HTMLAudioElement | HTMLVideoElement | null>(null);
   const transcriptSearchRef = useRef<HTMLInputElement | null>(null);
   const librarySearchRef = useRef<HTMLInputElement | null>(null);
@@ -482,10 +480,12 @@ export function useTranscribble() {
   const projectsRef = useRef<TranscriptProject[]>([]);
   const selectedProjectIdRef = useRef<string | null>(null);
   const helperInFlightRef = useRef<Set<string>>(new Set());
+  const helperCapabilitiesRef = useRef<LocalHelperCapabilities | null>(null);
   const helperUrlRef = useRef<string | null>(null);
   const recordingControllerRef = useRef<RecordingController | null>(null);
   const recordingStateRef = useRef<RecordingViewState>(INITIAL_RECORDING_VIEW_STATE);
   const pendingRecordedFileRef = useRef<PendingRecordedFile | null>(null);
+  const pendingRecordingPreviewUrlRef = useRef<string | null>(null);
   const liveTranscriptRef = useRef({ finalText: "", interimText: "" });
 
   const [projects, setProjects] = useState<TranscriptProject[]>([]);
@@ -535,7 +535,7 @@ export function useTranscribble() {
   const deferredTranscriptQuery = useDeferredValue(transcriptQuery);
 
   const persistProjectSelection = useCallback((projectId: string | null) => {
-    writeStoredJson(UI_STATE_KEY, { selectedProjectId: projectId } satisfies PersistedUiState);
+    writeStoredJson(UI_STATE_KEY, createPersistedProjectSelection(projectId));
   }, []);
 
   const refreshStorageState = useCallback(async () => {
@@ -547,6 +547,7 @@ export function useTranscribble() {
   const refreshHelperCapabilities = useCallback(async () => {
     const nextCapabilities = await fetchLocalHelperCapabilities();
     helperUrlRef.current = nextCapabilities.available ? nextCapabilities.url : null;
+    helperCapabilitiesRef.current = nextCapabilities;
     setHelperCapabilities(nextCapabilities);
     return nextCapabilities;
   }, []);
@@ -860,11 +861,13 @@ export function useTranscribble() {
       options?: {
         reason?: string;
         browserFailure?: boolean;
+        helperCapabilities?: LocalHelperCapabilities | null;
       },
     ) => {
-      if (!helperCapabilities?.available || !helperUrlRef.current) {
+      const helperStart = resolveLocalHelperStart(options?.helperCapabilities ?? helperCapabilitiesRef.current);
+      if (!helperStart.available) {
         const fallbackMessage = buildLocalHelperRequiredDetail(
-          options?.reason ?? helperCapabilities?.reason ?? "Transcribble Helper was not reachable on localhost.",
+          options?.reason ?? helperStart.reason,
         );
         markProjectNeedsLocalHelper(projectId, fallbackMessage);
         return;
@@ -912,7 +915,7 @@ export function useTranscribble() {
           { persist: true, select: true },
         );
 
-        const { job } = await createLocalHelperJob(helperUrlRef.current, {
+        const { job } = await createLocalHelperJob(helperStart.url, {
           jobId: project.backendJobId ?? project.id,
           projectId: project.id,
           sourceName: project.sourceName,
@@ -928,7 +931,7 @@ export function useTranscribble() {
         syncHelperJobIntoProject(projectId, job, { persist: true, select: true });
 
         const uploadResult = await uploadLocalHelperSourceFile(
-          helperUrlRef.current,
+          helperStart.url,
           job.id,
           sourceFile,
           (progress) => {
@@ -1002,8 +1005,6 @@ export function useTranscribble() {
     [
       applyProjectUpdate,
       finishProjectWithError,
-      helperCapabilities?.available,
-      helperCapabilities?.reason,
       helperPreferences.enableAlignment,
       helperPreferences.enableDiarization,
       helperPreferences.modelProfile,
@@ -1435,6 +1436,7 @@ export function useTranscribble() {
       }
 
       helperUrlRef.current = capabilities.available ? capabilities.url : null;
+      helperCapabilitiesRef.current = capabilities;
       setHelperCapabilities(capabilities);
     });
 
@@ -1477,13 +1479,12 @@ export function useTranscribble() {
       }
 
       const nextSelectedProjectId =
-        readStoredJson<PersistedUiState>(UI_STATE_KEY)?.selectedProjectId ?? null;
+        resolveInitialProjectSelection(
+          recoveredProjects,
+          readStoredJson<PersistedUiState>(UI_STATE_KEY),
+        );
 
-      setSelectedProjectId(
-        recoveredProjects.find((project) => project.id === nextSelectedProjectId)?.id ??
-          recoveredProjects[0]?.id ??
-          null,
-      );
+      setSelectedProjectId(nextSelectedProjectId);
       setWorkspaceReady(true);
     })();
 
@@ -1540,6 +1541,10 @@ export function useTranscribble() {
       if (mediaUrlRef.current) {
         URL.revokeObjectURL(mediaUrlRef.current);
         mediaUrlRef.current = null;
+      }
+      if (pendingRecordingPreviewUrlRef.current) {
+        URL.revokeObjectURL(pendingRecordingPreviewUrlRef.current);
+        pendingRecordingPreviewUrlRef.current = null;
       }
     };
   }, [refreshHelperCapabilities]);
@@ -1729,9 +1734,9 @@ export function useTranscribble() {
       const errors: string[] = [];
       let workingStorageState = storageState;
       const latestHelperCapabilities =
-        helperCapabilities?.available
-          ? helperCapabilities
-          : await refreshHelperCapabilities().catch(() => helperCapabilities);
+        helperCapabilitiesRef.current?.available
+          ? helperCapabilitiesRef.current
+          : await refreshHelperCapabilities().catch(() => helperCapabilitiesRef.current);
 
       for (const file of files) {
         const validation = await validateMediaImport(file, workingStorageState);
@@ -1838,6 +1843,7 @@ export function useTranscribble() {
         nextHelperStarts.forEach(({ project, file, detail }) => {
           void startHelperTranscriptionForProject(project.id, file, {
             reason: detail,
+            helperCapabilities: latestHelperCapabilities,
           });
         });
       }
@@ -1874,7 +1880,6 @@ export function useTranscribble() {
     },
     [
       capabilityIssue,
-      helperCapabilities,
       persistProjectSelection,
       refreshHelperCapabilities,
       refreshStorageState,
@@ -1900,6 +1905,9 @@ export function useTranscribble() {
 
   const onDrop = useCallback(
     (event: React.DragEvent<HTMLElement>) => {
+      if (!hasExternalFileDrag(event.dataTransfer)) {
+        return;
+      }
       event.preventDefault();
       setDragActive(false);
       void enqueueFiles(Array.from(event.dataTransfer.files ?? []));
@@ -2151,112 +2159,122 @@ export function useTranscribble() {
       notice: previous.notice,
     }));
 
-    const validation = await validateMediaImport(pending.file, storageState);
+    try {
+      const validation = await validateMediaImport(pending.file, storageState);
 
-    if (!validation.ok) {
-      throw new Error(validation.error ?? "This recording could not be saved in local storage.");
-    }
+      if (!validation.ok) {
+        throw new Error(validation.error ?? "This recording could not be saved in local storage.");
+      }
 
-    const latestHelperCapabilities =
-      helperCapabilities?.available
-        ? helperCapabilities
-        : await refreshHelperCapabilities().catch(() => helperCapabilities);
+      const latestHelperCapabilities =
+        helperCapabilitiesRef.current?.available
+          ? helperCapabilitiesRef.current
+          : await refreshHelperCapabilities().catch(() => helperCapabilitiesRef.current);
 
-    const backendDecision = chooseTranscriptionBackend(pending.file, {
-      browserLocalAvailable: capabilityIssue === null,
-      helperAvailable: Boolean(latestHelperCapabilities?.available),
-      deviceMemoryGb:
-        typeof navigator === "undefined"
-          ? null
-          : (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? null,
-      hardwareConcurrency:
-        typeof navigator === "undefined" ? null : navigator.hardwareConcurrency ?? null,
-    });
+      const backendDecision = chooseTranscriptionBackend(pending.file, {
+        browserLocalAvailable: capabilityIssue === null,
+        helperAvailable: Boolean(latestHelperCapabilities?.available),
+        deviceMemoryGb:
+          typeof navigator === "undefined"
+            ? null
+            : (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? null,
+        hardwareConcurrency:
+          typeof navigator === "undefined" ? null : navigator.hardwareConcurrency ?? null,
+      });
 
-    let project = createProjectFromRecordedFile(
-      pending.file,
-      runtime,
-      backendDecision.backend,
-      {
-        startedAt: new Date(pending.startedAt),
-        duration: pending.durationSeconds,
-        envelope: pending.envelope,
-      },
-    );
-
-    const provisionalTranscript = createProvisionalTranscript(
-      project.id,
-      pending.liveTranscriptText,
-      pending.durationSeconds,
-      pending.envelope,
-    );
-
-    if (provisionalTranscript) {
-      project = {
-        ...project,
-        transcript: provisionalTranscript,
-        detail:
-          "Saved on this device with a provisional live transcript. The final transcript will replace it after local transcription finishes.",
-      };
-    }
-
-    if (backendDecision.backend === "local-helper" && backendDecision.requiresHelperInstall) {
-      project = applyProjectStep(
+      let project = createProjectFromRecordedFile(
+        pending.file,
+        runtime,
+        backendDecision.backend,
         {
-          ...project,
-          backend: "local-helper",
-          transcriptionRoute: "local-helper",
-        },
-        {
-          status: "paused",
-          step: "needs-local-helper",
-          progress: 0,
-          detail: backendDecision.reason,
-          error: undefined,
+          startedAt: new Date(pending.startedAt),
+          duration: pending.durationSeconds,
+          envelope: pending.envelope,
         },
       );
-    }
 
-    await putProjectWithFile(project, pending.file);
-    pendingRecordedFileRef.current = null;
+      const provisionalTranscript = createProvisionalTranscript(
+        project.id,
+        pending.liveTranscriptText,
+        pending.durationSeconds,
+        pending.envelope,
+      );
 
-    const mergedProjects = sortProjects([project, ...projectsRef.current]);
-    projectsRef.current = mergedProjects;
-    setProjects(mergedProjects);
-    setSelectedProjectId(project.id);
-    persistProjectSelection(project.id);
-    void refreshStorageState();
+      if (provisionalTranscript) {
+        project = {
+          ...project,
+          transcript: provisionalTranscript,
+          detail:
+            "Saved on this device with a provisional live transcript. The final transcript will replace it after local transcription finishes.",
+        };
+      }
 
-    if (backendDecision.backend === "local-helper" && !backendDecision.requiresHelperInstall) {
-      void startHelperTranscriptionForProject(project.id, pending.file, {
-        reason: backendDecision.reason,
-      });
-    }
+      if (backendDecision.backend === "local-helper" && backendDecision.requiresHelperInstall) {
+        project = applyProjectStep(
+          {
+            ...project,
+            backend: "local-helper",
+            transcriptionRoute: "local-helper",
+          },
+          {
+            status: "paused",
+            step: "needs-local-helper",
+            progress: 0,
+            detail: backendDecision.reason,
+            error: undefined,
+          },
+        );
+      }
 
-    setRecordingState((previous) => ({
-      ...previous,
-      status:
-        project.status === "ready"
-          ? "saved"
-          : project.status === "error" || project.status === "paused"
+      await putProjectWithFile(project, pending.file);
+      pendingRecordedFileRef.current = null;
+
+      const mergedProjects = sortProjects([project, ...projectsRef.current]);
+      projectsRef.current = mergedProjects;
+      setProjects(mergedProjects);
+      setSelectedProjectId(project.id);
+      persistProjectSelection(project.id);
+      void refreshStorageState();
+
+      let finalProject = project;
+      if (backendDecision.backend === "local-helper" && !backendDecision.requiresHelperInstall) {
+        await startHelperTranscriptionForProject(project.id, pending.file, {
+          reason: backendDecision.reason,
+          helperCapabilities: latestHelperCapabilities,
+        });
+        finalProject = projectsRef.current.find((item) => item.id === project.id) ?? project;
+      }
+
+      setRecordingState((previous) => ({
+        ...previous,
+        status:
+          finalProject.status === "ready"
             ? "saved"
-            : "transcribing",
-      savedProjectId: project.id,
-      stoppedAt: new Date(pending.stoppedAt).toISOString(),
-      error: null,
-      canRetrySave: false,
-      notice: previous.notice,
-    }));
+            : finalProject.status === "error" || finalProject.status === "paused"
+              ? "saved"
+              : "transcribing",
+        savedProjectId: finalProject.id,
+        stoppedAt: new Date(pending.stoppedAt).toISOString(),
+        error: null,
+        canRetrySave: false,
+        notice: previous.notice,
+      }));
 
-    setNotice({
-      tone: "info",
-      message: `"${project.title}" was saved on this device.`,
-    });
+      setNotice({
+        tone: "info",
+        message: `"${finalProject.title}" was saved on this device.`,
+      });
 
-    return project;
+      return finalProject;
+    } catch (error) {
+      const canRetrySave = Boolean(pendingRecordedFileRef.current);
+      const message = getRecordingSaveErrorMessage(error);
+      setRecordingState((previous) => buildRecordingSaveFailureState(previous, error, canRetrySave));
+      setNotice({ tone: "error", message });
+      return null;
+    }
   }, [
     capabilityIssue,
-    helperCapabilities,
     persistProjectSelection,
     refreshHelperCapabilities,
     refreshStorageState,
@@ -2359,6 +2377,10 @@ export function useTranscribble() {
 
       pendingRecordedFileRef.current = pending;
       controller.pendingSave = pending;
+      if (pendingRecordingPreviewUrlRef.current) {
+        URL.revokeObjectURL(pendingRecordingPreviewUrlRef.current);
+      }
+      pendingRecordingPreviewUrlRef.current = URL.createObjectURL(file);
       setRecordingState((previous) => ({
         ...previous,
         status: "saving",
@@ -2369,6 +2391,7 @@ export function useTranscribble() {
         liveEnvelope: pending.envelope,
         liveFinalTranscript: liveTranscriptRef.current.finalText,
         liveInterimTranscript: liveTranscriptRef.current.interimText,
+        previewUrl: pendingRecordingPreviewUrlRef.current,
       }));
 
       await savePendingRecording();
@@ -2430,6 +2453,10 @@ export function useTranscribble() {
 
     const speechSupported = Boolean(getSpeechRecognitionConstructor());
     pendingRecordedFileRef.current = null;
+    if (pendingRecordingPreviewUrlRef.current) {
+      URL.revokeObjectURL(pendingRecordingPreviewUrlRef.current);
+      pendingRecordingPreviewUrlRef.current = null;
+    }
     liveTranscriptRef.current = { finalText: "", interimText: "" };
     setRecordingState({
       ...INITIAL_RECORDING_VIEW_STATE,
@@ -2872,19 +2899,8 @@ export function useTranscribble() {
     (sourceId: string, targetId: string, position: "before" | "after") => {
       if (sourceId === targetId) return;
       setProjects((previous) => {
-        const source = previous.find((project) => project.id === sourceId);
-        const target = previous.find((project) => project.id === targetId);
-        if (!source || !target) return previous;
-        const withoutSource = previous.filter((project) => project.id !== sourceId);
-        const targetIndex = withoutSource.findIndex((project) => project.id === targetId);
-        if (targetIndex === -1) return previous;
-        const insertIndex = position === "before" ? targetIndex : targetIndex + 1;
-        const reordered = [
-          ...withoutSource.slice(0, insertIndex),
-          { ...source, pinned: target.pinned },
-          ...withoutSource.slice(insertIndex),
-        ];
-        const next = reordered.map((project, index) => ({ ...project, sortOrder: index }));
+        const next = sortProjects(reorderProjectsById(previous, sourceId, targetId, position));
+        projectsRef.current = next;
         void putProjects(next);
         return next;
       });
@@ -3013,6 +3029,14 @@ export function useTranscribble() {
         return;
       }
 
+      if (!getProjectViewState(selectedProject).canSaveRanges) {
+        setNotice({
+          tone: "error",
+          message: "Wait for the final transcript before saving a review range.",
+        });
+        return;
+      }
+
       const bounds = normalizeRangeBounds(range.start, range.end);
       const segments = getSegmentsForRange(selectedProject.transcript.segments, bounds.start, bounds.end);
 
@@ -3097,24 +3121,30 @@ export function useTranscribble() {
           const { job } = await retryLocalHelperJob(helperUrlRef.current, project.backendJobId);
           syncHelperJobIntoProject(projectId, job, { persist: true, select: true });
         } catch (error) {
+          const rawMessage =
+            error instanceof Error
+              ? error.message
+              : "Could not retry the local accelerator for this recording.";
           setNotice({
             tone: "error",
             message:
-              error instanceof Error
-                ? error.message
-                : "Could not retry the local accelerator for this recording.",
+              isLocalHelperConnectionFailure(rawMessage)
+                ? buildLocalHelperRequiredDetail(rawMessage)
+                : rawMessage,
           });
         }
         return;
       }
 
       if (project.backend === "local-helper" || project.step === "needs-local-helper") {
-        await refreshHelperCapabilities().catch(() => helperCapabilities);
+        const latestHelperCapabilities =
+          await refreshHelperCapabilities().catch(() => helperCapabilitiesRef.current);
         await startHelperTranscriptionForProject(
           projectId,
           undefined,
           {
             reason: project.detail || buildLocalHelperRequiredDetail(),
+            helperCapabilities: latestHelperCapabilities,
           },
         );
         return;
@@ -3135,7 +3165,6 @@ export function useTranscribble() {
     },
     [
       applyProjectUpdate,
-      helperCapabilities,
       refreshHelperCapabilities,
       startHelperTranscriptionForProject,
       syncHelperJobIntoProject,
@@ -3167,8 +3196,9 @@ export function useTranscribble() {
         void cancelLocalHelperJob(helperUrlRef.current, project.backendJobId);
       }
 
-      const nextProjects = projectsRef.current.filter((item) => item.id !== projectId);
-      setProjects(sortProjects(nextProjects));
+      const nextProjects = sortProjects(projectsRef.current.filter((item) => item.id !== projectId));
+      projectsRef.current = nextProjects;
+      setProjects(nextProjects);
 
       if (selectedProjectId === projectId) {
         const fallbackProjectId = nextProjects[0]?.id ?? null;
@@ -3335,6 +3365,92 @@ export function useTranscribble() {
     }));
   }, []);
 
+  const exportWorkspaceBackup = useCallback(async () => {
+    try {
+      const backup = await createWorkspaceBackup(projectsRef.current, getProjectFile);
+      const blob = new Blob([JSON.stringify(backup, null, 2)], {
+        type: "application/json;charset=utf-8",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `transcribble-workspace-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+
+      const missingMedia = backup.projects.filter((entry) => entry.media.status === "missing").length;
+      setNotice({
+        tone: missingMedia > 0 ? "error" : "info",
+        message:
+          missingMedia > 0
+            ? `Workspace backup saved with ${backup.projects.length} recording${backup.projects.length === 1 ? "" : "s"}. ${missingMedia} media file${missingMedia === 1 ? " was" : "s were"} not readable and will restore as transcript metadata only.`
+            : `Workspace backup saved with ${backup.projects.length} recording${backup.projects.length === 1 ? "" : "s"}.`,
+      });
+    } catch {
+      setNotice({
+        tone: "error",
+        message: "Transcribble could not create a workspace backup from this browser storage.",
+      });
+    }
+  }, []);
+
+  const importWorkspaceBackupFile = useCallback(async (file: File) => {
+    try {
+      const parsed = JSON.parse(await file.text()) as unknown;
+      const validation = validateWorkspaceBackupPayload(parsed);
+      if (!validation.ok) {
+        throw new Error(validation.error);
+      }
+
+      const prepared = await prepareWorkspaceBackupImport(validation.backup, projectsRef.current);
+      for (const project of prepared.projects) {
+        const media = prepared.files.find((item) => item.fileStoreKey === project.fileStoreKey);
+        if (media) {
+          await putProjectWithFile(project, media.file);
+        } else {
+          await putProject(project);
+        }
+      }
+
+      const mergedProjects = sortProjects([...prepared.projects, ...projectsRef.current]);
+      projectsRef.current = mergedProjects;
+      setProjects(mergedProjects);
+      void refreshStorageState();
+      setNotice({
+        tone: prepared.summary.missingMedia > 0 ? "error" : "info",
+        message:
+          `Imported ${prepared.summary.importedProjects} recording${prepared.summary.importedProjects === 1 ? "" : "s"} from the workspace backup. ` +
+          `${prepared.summary.restoredMedia} media file${prepared.summary.restoredMedia === 1 ? "" : "s"} restored` +
+          (prepared.summary.missingMedia > 0
+            ? `; ${prepared.summary.missingMedia} will use transcript metadata only.`
+            : "."),
+      });
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "This workspace backup could not be imported.",
+      });
+    }
+  }, [refreshStorageState]);
+
+  const openWorkspaceBackupImport = useCallback(() => {
+    backupImportRef.current?.click();
+  }, []);
+
+  const onWorkspaceBackupInputChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (file) {
+        void importWorkspaceBackupFile(file);
+      }
+      event.target.value = "";
+    },
+    [importWorkspaceBackupFile],
+  );
+
   const updateHelperModelProfile = useCallback((modelProfile: HelperModelProfile) => {
     setHelperPreferences((previous) => ({
       ...previous,
@@ -3461,6 +3577,7 @@ export function useTranscribble() {
 
   return {
     inputRef,
+    backupImportRef,
     mediaRef,
     transcriptSearchRef,
     librarySearchRef,
@@ -3501,12 +3618,19 @@ export function useTranscribble() {
     workspaceReady,
     openFilePicker,
     onFileInputChange,
+    onWorkspaceBackupInputChange,
     onDrop,
     onDragOver: (event: React.DragEvent<HTMLElement>) => {
+      if (!hasExternalFileDrag(event.dataTransfer)) {
+        return;
+      }
       event.preventDefault();
       setDragActive(true);
     },
     onDragLeave: (event: React.DragEvent<HTMLElement>) => {
+      if (!hasExternalFileDrag(event.dataTransfer)) {
+        return;
+      }
       event.preventDefault();
       setDragActive(false);
     },
@@ -3541,6 +3665,8 @@ export function useTranscribble() {
     refreshStorageState,
     resetSetupState,
     promptInstall,
+    exportWorkspaceBackup,
+    openWorkspaceBackupImport,
     refreshHelperCapabilities,
     updateHelperAlignment,
     updateHelperDiarization,

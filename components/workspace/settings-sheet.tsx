@@ -7,6 +7,7 @@ import {
   Loader2,
   RotateCcw,
   Shield,
+  Upload,
   Wifi,
   WifiOff,
   X,
@@ -58,6 +59,7 @@ interface SettingsSheetProps {
   helperModels: LocalHelperModelAvailability[];
   helperModelProfile: HelperModelProfile;
   helperPhraseHints: string;
+  helperSupportsPhraseHints: boolean;
   helperSupportsAlignment: boolean;
   helperSupportsDiarization: boolean;
   helperAlignmentEnabled: boolean;
@@ -67,6 +69,8 @@ interface SettingsSheetProps {
   onHelperAlignmentChange: (value: boolean) => void;
   onHelperDiarizationChange: (value: boolean) => void;
   onRefreshHelper: () => void | Promise<void>;
+  onExportWorkspaceBackup: () => void | Promise<void>;
+  onImportWorkspaceBackup: () => void | Promise<void>;
 }
 
 const FOCUSABLE_SELECTOR =
@@ -101,6 +105,7 @@ export function SettingsSheet({
   helperModels,
   helperModelProfile,
   helperPhraseHints,
+  helperSupportsPhraseHints,
   helperSupportsAlignment,
   helperSupportsDiarization,
   helperAlignmentEnabled,
@@ -110,6 +115,8 @@ export function SettingsSheet({
   onHelperAlignmentChange,
   onHelperDiarizationChange,
   onRefreshHelper,
+  onExportWorkspaceBackup,
+  onImportWorkspaceBackup,
 }: SettingsSheetProps) {
   const titleId = useId();
   const descriptionId = useId();
@@ -445,15 +452,20 @@ export function SettingsSheet({
                     Phrase dictionary
                   </label>
                   <p className="mt-0.5 text-[11px] leading-5 text-muted-foreground">
-                    Names, acronyms, and domain terms to bias the local accelerator.
+                    {helperAvailable
+                      ? helperSupportsPhraseHints
+                        ? "Names, acronyms, and domain terms bias the selected local helper backend."
+                        : "This helper backend does not expose phrase-bias support."
+                      : "Available after the helper starts and reports phrase-bias support."}
                   </p>
                   <textarea
                     id={`${titleId}-helper-hints`}
                     value={helperPhraseHints}
                     onChange={(event) => onHelperPhraseHintsChange(event.target.value)}
+                    disabled={helperAvailable && !helperSupportsPhraseHints}
                     rows={4}
                     placeholder="Acme Ops&#10;RFP&#10;Maya Patel"
-                    className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-[12px] text-foreground ring-focus"
+                    className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-[12px] text-foreground disabled:opacity-60 ring-focus"
                   />
                 </div>
 
@@ -461,7 +473,7 @@ export function SettingsSheet({
                   <label className="flex items-start gap-3 rounded-xl border border-border/80 bg-surface/70 px-3 py-3 text-[12px]">
                     <input
                       type="checkbox"
-                      checked={helperAlignmentEnabled}
+                      checked={helperSupportsAlignment && helperAlignmentEnabled}
                       disabled={!helperSupportsAlignment}
                       onChange={(event) => onHelperAlignmentChange(event.target.checked)}
                       className="mt-0.5 h-4 w-4 rounded border-border"
@@ -477,7 +489,7 @@ export function SettingsSheet({
                   <label className="flex items-start gap-3 rounded-xl border border-border/80 bg-surface/70 px-3 py-3 text-[12px]">
                     <input
                       type="checkbox"
-                      checked={helperDiarizationEnabled}
+                      checked={helperSupportsDiarization && helperDiarizationEnabled}
                       disabled={!helperSupportsDiarization}
                       onChange={(event) => onHelperDiarizationChange(event.target.checked)}
                       className="mt-0.5 h-4 w-4 rounded border-border"
@@ -485,7 +497,9 @@ export function SettingsSheet({
                     <span>
                       <span className="block font-medium text-foreground">Optional diarization</span>
                       <span className="mt-0.5 block text-muted-foreground">
-                        {helperSupportsDiarization ? "Try local speaker labeling when the machine can handle it." : "Unavailable in the current helper build."}
+                        {helperSupportsDiarization
+                          ? "Try local speaker labeling when the machine can handle it."
+                          : "Unavailable in this helper build. Current speaker turns remain pause-derived, not diarized."}
                       </span>
                     </span>
                   </label>
@@ -512,6 +526,27 @@ export function SettingsSheet({
                   {installPromptAvailable ? "Install" : "Set up"}
                 </ActionButton>
               )}
+            </Row>
+          </Block>
+
+          <Block title="Workspace backup">
+            <Row
+              label="Export workspace"
+              detail="Save a local JSON backup with project metadata, transcripts, ranges, and media files the browser can still read."
+            >
+              <ActionButton onClick={() => void onExportWorkspaceBackup()}>
+                <Download className="h-3 w-3" />
+                Export
+              </ActionButton>
+            </Row>
+            <Row
+              label="Import workspace"
+              detail="Add projects from a Transcribble backup without replacing the current library. Missing media restores as transcript metadata only."
+            >
+              <ActionButton onClick={() => void onImportWorkspaceBackup()}>
+                <Upload className="h-3 w-3" />
+                Import
+              </ActionButton>
             </Row>
           </Block>
 

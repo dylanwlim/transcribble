@@ -33,12 +33,17 @@ Do not assume:
 - Live transcript while recording is browser SpeechRecognition/webkitSpeechRecognition only where available. Treat it as provisional browser dictation, not the final local transcript and not a fully local layer.
 - Saved microphone recordings must enter the existing IndexedDB/OPFS project pipeline and the existing browser/helper transcription route after stop.
 - Speaker turns are currently pause-derived. `speakerLabel`, `manual`, and `diarized` are future seams, not a finished speaker workflow.
-- Export is transcript-focused (`txt`, `md`, `srt`, `vtt`). Whole-workspace backup/import is still missing.
+- Export is transcript-focused (`txt`, `md`, `srt`, `vtt`). Workspace backup/import is local JSON, additive by default, and honest about missing media.
 - `lib/transcribble/enrichment.ts` is optional and feature-flagged. Core flows should not depend on hosted enrichments.
 - Verify Vercel before touching public URLs. Keep `README.md` and `app/layout.tsx` aligned with the live public alias, not stale defaults.
 - Helper model downloads are one-time local cache events under `~/.transcribble-helper`; UI/docs should describe them honestly and avoid claiming the model is already cached before the weight files are actually present.
 - Helper-backed long media chunks locally, can run bounded chunk workers, and stitches the transcript before export. `TRANSCRIBBLE_HELPER_CHUNK_WORKERS=1..4` overrides the default worker count before `npm run helper:start`.
+- Helper phrase hints are backend capability-gated. The current helper passes phrase hints to both MLX Whisper and `faster-whisper`; UI copy should not claim support for a backend unless `/capabilities` reports it.
+- Long-media helper-required copy must stay actionable and include `npm run helper:start` and `npm run helper:check`.
 - Keep the main UI calm and Voice Memos-like: recording list, drag-in import, focused player/transcript, clear `.txt` export, and a visible desktop-app install/open affordance. Avoid bringing back dashboard-style panels unless the workflow truly needs them.
+- `app/manifest.ts` shortcuts must map to real single-route app actions. `/?action=add` is handled by the app and should keep opening the add-recording path without duplicating recording work.
+- `public/sw.js` is intentionally narrow: network-first navigations, versioned static asset caches, old-cache cleanup on activate, and no caching for helper/API/localhost-style responses.
+- Workspace backup/import is local JSON and additive by default. It validates schema before writing, remaps conflicting IDs, restores media only when the browser can read it from local storage, and otherwise restores metadata/transcripts with an explicit missing-media state.
 
 Validation:
 - Docs/instruction-only edits: verify referenced files and commands exist; do not run `npm run validate` by default.
